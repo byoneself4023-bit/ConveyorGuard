@@ -1,0 +1,14 @@
+﻿Model,Type,Test_Acc,Test_F1,Train_Time
+Stacking,Ensemble,96.8905472636816,96.89092313433748,0.0
+LightGBM,ML,96.89,96.43,2.7
+Weighted Voting,Ensemble,96.70398009950247,96.70711460500904,0.0
+XGBoost,ML,96.7,96.28,3.8
+Soft Voting,Ensemble,96.64179104477611,96.64450914154122,0.0
+CatBoost,ML,96.46,96.01,21.5
+RandomForest,ML,95.58,95.19,3.7
+CNN+Transformer (Baseline),DL,93.24324324324324,92.8,0.0
+DecisionTree,ML,92.97,92.0,0.6
+KNN (k=5),ML,89.12,88.28,0.0
+SVM (RBF),ML,87.75,87.01,1.0
+CNN+Transformer (Tuned),DL,87.74875621890547,88.13,0.0
+LogisticRegression,ML,87.31,86.81,2.0

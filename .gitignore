@@ -1,0 +1,51 @@
+# 환경 변수
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 모델 파일
+*.pt
+*.pth
+*.joblib
+*.pkl
+
+# 로그
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 데이터
+data/uploads/*
+!data/uploads/.gitkeep
+
+# EDA 대용량 결과
+docs/eda/iframe_figures/
+
+# 환경변수 (서비스별)
+conveyorguard-api/.env
+llm-service/.env
+
+# Streamlit Secrets (로컬 개발용)
+streamlit-demo/.streamlit/secrets.toml

@@ -1,0 +1,35 @@
+# llm-service/requirements.txt
+# ConveyorGuard LLM Service Dependencies
+
+# ============================================
+# API Framework
+# ============================================
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+
+# ============================================
+# LLM - Google Gemini
+# ============================================
+google-generativeai>=0.3.0
+
+# ============================================
+# LangChain + LangGraph
+# ============================================
+langchain>=0.1.0
+langchain-google-genai>=1.0.0
+langchain-community>=0.0.10
+langgraph>=0.0.20
+
+# ============================================
+# RAG - Vector Store & Embeddings
+# ============================================
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.0
+
+# ============================================
+# Utilities
+# ============================================
+python-dotenv>=1.0.0
+numpy>=1.24.0
+httpx>=0.25.0

@@ -1,0 +1,42 @@
+{
+  "data_info": {
+    "total_sessions": 341,
+    "total_frames": 111870,
+    "sensors": [
+      "NTC",
+      "PM1.0",
+      "PM2.5",
+      "PM10",
+      "CT1",
+      "CT2",
+      "CT3",
+      "CT4"
+    ]
+  },
+  "class_distribution": {
+    "normal": 54928,
+    "minor": 24081,
+    "moderate": 24191,
+    "severe": 8670,
+    "imbalance_ratio": 6.34
+  },
+  "severe_analysis": {
+    "dominant_sessions": 0,
+    "containing_sessions": 289
+  },
+  "sensor_importance": {
+    "NTC": 0.792,
+    "CT2": 0.382,
+    "CT1": 0.336,
+    "CT4": 0.233,
+    "PM10": 0.214,
+    "PM2.5": 0.204,
+    "PM1.0": 0.201,
+    "CT3": 0.179
+  },
+  "external_correlation": {
+    "Illuminance": 0.058,
+    "Temperature": 0.056,
+    "Humidity": 0.048
+  }
+}
