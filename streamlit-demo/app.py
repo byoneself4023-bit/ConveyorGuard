@@ -33,8 +33,8 @@ st.markdown("""
         border-radius: 8px;
         padding: 12px 16px;
     }
-    div[data-testid="stMetric"] label { font-size: 0.85rem; }
-    .sensor-gauge { margin-bottom: 4px; }
+    div[data-testid="stMetric"] label { font-size: 0.8rem; }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] { font-size: 1.5rem; }
 </style>
 """, unsafe_allow_html=True)
 
