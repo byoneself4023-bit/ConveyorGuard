@@ -83,7 +83,7 @@ with tab1:
         })
         fig = px.pie(class_df, names="클래스", values="프레임 수",
                      color_discrete_sequence=["#22C55E", "#FACC15", "#F97316", "#EF4444"])
-        fig.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+        fig.update_layout(height=320, margin=dict(l=0, r=0, t=30, b=0),
                           paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -167,7 +167,7 @@ with tab2:
                 ))
             fig.update_layout(
                 barmode="group", title="클래스별 센서 평균값",
-                height=300, margin=dict(l=0, r=0, t=30, b=0),
+                height=280, margin=dict(l=0, r=0, t=30, b=0),
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 legend=dict(orientation="h", y=-0.15),
             )
@@ -189,56 +189,196 @@ with tab2:
             fig = px.imshow(corr_matrix, x=sensor_names, y=sensor_names,
                             color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
                             title="센서 간 상관관계")
-            fig.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0),
+            fig.update_layout(height=280, margin=dict(l=0, r=0, t=30, b=0),
                               paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig, use_container_width=True)
 
         st.info("💡 **발견**: 심각 클래스에서 NTC, CT1, PM2.5 평균이 급등. PM 센서끼리(0.95), CT 센서끼리(0.90) 높은 상관 → 다중공선성 주의 필요.")
 
-        # 심화: 센서 중요도 순위
-        st.markdown("#### 센서별 열화 상태 상관도")
-        st.markdown("""
-| 순위 | 센서 | 상관도 | 의미 |
-|------|------|--------|------|
-| 1 | **NTC (온도)** | **0.79** | 열화 상태와 가장 강한 상관 |
-| 2 | CT2 (전류) | 0.38 | 모터 부하 반영 |
-| 3 | CT1 (전류) | 0.34 | 전류 이상 패턴 |
-| 4 | PM2.5 | 0.15 | 미세먼지 증가 |
+        # 3열 레이아웃: 센서 상관도 + 열화상 온도 + 외부환경
+        eda_col1, eda_col2, eda_col3 = st.columns(3)
 
-> **심각(3) 클래스 특성**: 세션 전체가 심각인 경우 0개, 하지만 심각 포함 세션은 289개(85%)
-> → 세션 단위가 아닌 **윈도우 단위 분류**가 필수
+        with eda_col1:
+            st.markdown("##### 센서 상관도 순위")
+            st.markdown("""
+| 순위 | 센서 | 상관도 |
+|------|------|--------|
+| 1 | **NTC** | **0.792** |
+| 2 | CT2 | 0.382 |
+| 3 | CT1 | 0.336 |
+| 4 | CT4 | 0.233 |
+""")
+
+        with eda_col2:
+            st.markdown("##### 열화상 온도 변화")
+            st.markdown("""
+| 상태 | max 온도 | std |
+|------|----------|-----|
+| 정상 | 49°C | 1.5 |
+| 경미 | 67°C | 3.8 |
+| 중간 | 84°C | 7.0 |
+| **심각** | **96°C** | 8.2 |
+""")
+
+        with eda_col3:
+            st.markdown("##### 외부환경 영향")
+            st.markdown("""
+| 환경 | 상관도 |
+|------|--------|
+| 조도 | 0.058 |
+| 온도 | 0.056 |
+| 습도 | 0.048 |
+
+**모두 0.06 미만 → 거의 무관**
+""")
+
+        # 핵심 발견: 심각 클래스 특성
+        st.warning("""**핵심 발견: 심각(3) 클래스의 특성**
+
+| 항목 | 값 | 의미 |
+|------|-----|------|
+| 심각 dominant 세션 | **0개** | 세션 전체가 심각인 경우 없음 |
+| 심각 포함 세션 | **289개** (85%) | 대부분 세션에 심각 구간 존재 |
+
+> **비유**: 1시간 영화에서 무서운 장면이 5분만 나옴
+> - 영화 전체 = "로맨스" (dominant) / 5분 구간 = "공포" (심각)
+> - ❌ 세션 단위 분류 → 심각 탐지 불가
+> - ✅ **윈도우 단위 분류 → 심각 탐지 가능**
 """)
 
     # --- Step 01: 전처리 ---
     elif step_idx == 1:
         st.markdown("### 01. 전처리")
-        st.markdown("시계열 센서 데이터를 모델이 학습할 수 있는 구조로 변환합니다.")
 
-        st.markdown("""
-#### 30프레임 슬라이딩 윈도우 구조
-```
-세션 내 프레임:  [f1] [f2] [f3] ... [f30] [f31] [f32] ...
-                 |__________________________|
-                          윈도우 1
-                      |__________________________|
-                               윈도우 2
-```
-""")
+        # 핵심 결과 요약
+        st.info("**목표**: 시계열 센서 데이터를 모델이 학습할 수 있는 구조로 변환 (세션 기반 분할로 데이터 누출 방지)")
 
-        w_col1, w_col2, w_col3 = st.columns(3)
+        # 핵심 metric
+        w_col1, w_col2, w_col3, w_col4 = st.columns(4)
         w_col1.metric("윈도우 크기", "30 프레임")
         w_col2.metric("세션 수", "341개")
         w_col3.metric("분할 방식", "세션 기반")
+        w_col4.metric("입력 모달리티", "3종")
 
-        st.markdown("""
-| 항목 | 설명 |
-|------|------|
-| 윈도우 | 30프레임 슬라이딩, stride=1 |
-| 분할 | 세션 단위 Train(70%) / Val(15%) / Test(15%) |
-| 입력 모달리티 | 센서(8ch) + 열화상(224x224) + 외부환경(온도/습도) |
+        st.divider()
+
+        # 2열 레이아웃: 슬라이딩 윈도우 시각화 + 데이터 분할 도넛
+        prep_col1, prep_col2 = st.columns(2)
+
+        with prep_col1:
+            st.markdown("#### 슬라이딩 윈도우 구조")
+            # Plotly 타임라인으로 슬라이딩 윈도우 시각화
+            window_fig = go.Figure()
+
+            # 프레임 배경
+            for i in range(1, 36):
+                window_fig.add_shape(
+                    type="rect", x0=i-0.4, x1=i+0.4, y0=0, y1=3,
+                    fillcolor="rgba(59, 130, 246, 0.1)", line=dict(color="rgba(59, 130, 246, 0.3)", width=1),
+                )
+
+            # 윈도우 1 (프레임 1-30)
+            window_fig.add_shape(
+                type="rect", x0=0.5, x1=30.5, y0=2.2, y1=2.8,
+                fillcolor="rgba(34, 197, 94, 0.4)", line=dict(color="#22C55E", width=2),
+            )
+            window_fig.add_annotation(x=15.5, y=2.5, text="윈도우 1", showarrow=False, font=dict(size=12, color="#22C55E"))
+
+            # 윈도우 2 (프레임 2-31)
+            window_fig.add_shape(
+                type="rect", x0=1.5, x1=31.5, y0=1.2, y1=1.8,
+                fillcolor="rgba(249, 115, 22, 0.4)", line=dict(color="#F97316", width=2),
+            )
+            window_fig.add_annotation(x=16.5, y=1.5, text="윈도우 2", showarrow=False, font=dict(size=12, color="#F97316"))
+
+            # 윈도우 3 (프레임 3-32)
+            window_fig.add_shape(
+                type="rect", x0=2.5, x1=32.5, y0=0.2, y1=0.8,
+                fillcolor="rgba(139, 92, 246, 0.4)", line=dict(color="#8B5CF6", width=2),
+            )
+            window_fig.add_annotation(x=17.5, y=0.5, text="윈도우 3", showarrow=False, font=dict(size=12, color="#8B5CF6"))
+
+            window_fig.update_layout(
+                height=280, margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(title="프레임 번호", range=[0, 36], dtick=5),
+                yaxis=dict(visible=False, range=[-0.2, 3.2]),
+                showlegend=False,
+            )
+            st.plotly_chart(window_fig, use_container_width=True)
+            st.caption("stride=1로 연속 윈도우 생성")
+
+        with prep_col2:
+            st.markdown("#### 데이터 분할 비율")
+            # 도넛 차트
+            split_df = pd.DataFrame({
+                "분할": ["Train (70%)", "Val (15%)", "Test (15%)"],
+                "세션 수": [239, 51, 51],
+                "비율": [70, 15, 15],
+            })
+            fig = px.pie(split_df, names="분할", values="비율",
+                         color="분할",
+                         color_discrete_map={
+                             "Train (70%)": "#3B82F6",
+                             "Val (15%)": "#F97316",
+                             "Test (15%)": "#22C55E",
+                         },
+                         hole=0.5)
+            fig.update_layout(
+                height=280, margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", y=-0.1),
+            )
+            fig.update_traces(textinfo="label+percent", textposition="outside")
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("세션 단위 분할 (동일 세션 내 프레임 분리 방지)")
+
+        # 멀티모달 입력 + 클래스 가중치
+        input_col, weight_col = st.columns(2)
+
+        with input_col:
+            st.markdown("#### 멀티모달 입력 구조")
+            st.markdown("""
+| 모달리티 | Shape | 설명 |
+|----------|-------|------|
+| 센서 | (N, 30, 8) | 8채널 × 30프레임 |
+| 열화상 | (N, 30, 60, 80) | 60×80 × 30프레임 |
+| 외부환경 | (N, 30, 3) | 3채널 × 30프레임 |
 """)
 
-        st.info("💡 **발견**: 세션 기반 분할로 데이터 누출(data leakage) 방지. 같은 세션의 프레임이 Train과 Test에 동시에 포함되지 않도록 보장.")
+        with weight_col:
+            st.markdown("#### 클래스 가중치 (불균형 대응)")
+            st.markdown("""
+| 클래스 | 가중치 | 의미 |
+|--------|--------|------|
+| 정상(0) | 0.28 | 틀려도 페널티 낮음 |
+| 경미(1) | 0.60 | - |
+| 중간(2) | 0.61 | - |
+| **심각(3)** | **2.51** | 틀리면 페널티 **9배!** |
+""")
+
+        # 최종 데이터셋 통계
+        st.markdown("#### 최종 데이터셋")
+        stat_col1, stat_col2 = st.columns(2)
+        with stat_col1:
+            st.markdown("""
+| Split | 윈도우 | 세션 |
+|-------|--------|------|
+| Train | 7,311 | 238 |
+| Val | 1,554 | 51 |
+| Test | 1,608 | 52 |
+""")
+        with stat_col2:
+            st.markdown("""
+| 클래스 | Train | Val | Test |
+|--------|-------|-----|------|
+| 정상 | 3,586 | 732 | 788 |
+| 경미 | 1,682 | 367 | 371 |
+| 중간 | 1,642 | 367 | 361 |
+| **심각** | **401** | 88 | 88 |
+""")
+
+        st.success("**핵심**: 세션 기반 분할로 데이터 누출 방지 + 클래스 가중치로 심각(3) 탐지 강화")
 
     # --- Step 02: DL Baseline ---
     elif step_idx == 2:
@@ -351,7 +491,7 @@ with tab2:
         fig = px.bar(ml_data, x="정확도", y="모델", orientation="h",
                      title="ML 8종 Test Accuracy (%)",
                      text=ml_data["정확도"].apply(lambda x: f"{x:.2f}%"))
-        fig.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+        fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0),
                           paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                           xaxis_range=[85, 98])
         fig.update_traces(textposition="outside", marker_color="#3B82F6")
@@ -394,7 +534,7 @@ with tab2:
             })
             fig = px.bar(fi_data, x="Importance", y="피처", orientation="h",
                          title="XGBoost Feature Importance")
-            fig.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+            fig.update_layout(height=320, margin=dict(l=0, r=0, t=30, b=0),
                               paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                               yaxis=dict(autorange="reversed"))
             fig.update_traces(marker_color="#F97316")
@@ -413,7 +553,7 @@ with tab2:
                             y=["정상", "경미", "중간", "심각"],
                             text_auto=True, color_continuous_scale="Blues",
                             title="Predicted vs Actual")
-            fig.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+            fig.update_layout(height=320, margin=dict(l=0, r=0, t=30, b=0),
                               paper_bgcolor="rgba(0,0,0,0)",
                               xaxis_title="Predicted", yaxis_title="Actual")
             st.plotly_chart(fig, use_container_width=True)
@@ -467,19 +607,32 @@ with tab2:
     # --- Step 04: DL 튜닝 ---
     elif step_idx == 4:
         st.markdown("### 04. DL 튜닝 (Optuna + Ablation Study)")
-        st.markdown("DL 성능을 끌어올려 ML을 역전할 수 있을까?")
 
-        # Ablation Study
+        # 핵심 결과 요약 (상단 hero)
+        st.info("**목표**: Optuna 하이퍼파라미터 튜닝 + Ablation Study로 DL 성능을 끌어올려 ML을 역전할 수 있을까?")
+
+        # 핵심 metric 강조
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("DL 최고 성능", "90.48%", delta="-6.41%p vs LightGBM", delta_color="inverse")
+        m_col2.metric("센서 단독", "89.12%", help="이미지 없이 센서만 사용")
+        m_col3.metric("이미지 기여", "+0.52%p", help="Full vs Sensor Only")
+        m_col4.metric("Pruned Trial", "4/8", help="MedianPruner로 조기 종료")
+
+        st.divider()
+
+        # Ablation Study - 전체 너비 차트
+        st.markdown("#### Ablation Study: 모달리티별 기여도")
         ablation_df = pd.DataFrame({
             "구성": ["Sensor Only", "Image Only", "Sensor+Image", "Full+FiLM"],
             "정확도": [89.12, 69.56, 89.64, 90.35],
+            "설명": ["센서 8ch만", "열화상만", "센서+열화상", "전체+FiLM"],
         })
         fig = px.bar(ablation_df, x="구성", y="정확도",
-                     title="Ablation Study: 모달리티별 기여도",
+                     title="",
                      text=ablation_df["정확도"].apply(lambda x: f"{x:.2f}%"),
                      color="정확도",
                      color_continuous_scale=["#EF4444", "#FACC15", "#22C55E"])
-        fig.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+        fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0),
                           paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                           yaxis_range=[60, 98], showlegend=False)
         fig.update_traces(textposition="outside")
@@ -487,36 +640,56 @@ with tab2:
                       annotation_text="LightGBM (96.89%)")
         st.plotly_chart(fig, use_container_width=True)
 
-        t_col1, t_col2 = st.columns(2)
+        # 파라미터 + Trial을 3:2 비율로 컴팩트하게
+        t_col1, t_col2 = st.columns([3, 2])
         with t_col1:
-            st.markdown("""
-#### Optuna 탐색 공간 & 최적값
+            st.markdown("##### Optuna 탐색 공간 & 최적값")
+            opt_df = pd.DataFrame({
+                "파라미터": ["embed_dim", "num_heads", "num_layers", "dropout", "lr", "weight_decay"],
+                "범위": ["[128, 256]", "[4, 8]", "[1, 2]", "[0.1, 0.3]", "1e-4 ~ 1e-3", "1e-5 ~ 1e-3"],
+                "최적값": ["256", "4", "2", "0.1", "1.96e-4", "5.4e-5"],
+            })
+            st.dataframe(opt_df, use_container_width=True, hide_index=True, height=250)
 
-| 파라미터 | 범위 | 최적값 |
-|----------|------|--------|
-| embed_dim | [128, 256] | **256** |
-| num_heads | [4, 8] | **4** |
-| num_layers | [1, 2] | **2** |
-| dropout | [0.1, 0.3] | **0.1** |
-| lr | 1e-4 ~ 1e-3 | **1.96e-4** |
-| weight_decay | 1e-5 ~ 1e-3 | **5.4e-5** |
-""")
         with t_col2:
+            st.markdown("##### Trial 결과")
+            trial_df = pd.DataFrame({
+                "Trial": ["0", "1", "**2**", "3", "4-7"],
+                "Val Acc": ["88.74%", "89.83%", "**90.48%**", "90.09%", "-"],
+                "상태": ["완료", "완료", "Best", "완료", "Pruned"],
+            })
+            st.dataframe(trial_df, use_container_width=True, hide_index=True, height=250)
+
+        st.warning("**핵심 발견**: 센서가 지배적(89%), 이미지 기여 미미(+0.5%p). Optuna 튜닝으로도 **LightGBM 96.89%를 역전 불가**.")
+
+        # Ablation 인사이트 + Baseline vs Tuned
+        comp_col1, comp_col2 = st.columns(2)
+        with comp_col1:
+            st.markdown("##### Ablation Study 인사이트")
             st.markdown("""
-#### Trial 결과
+| 구성 | 효과 | 의미 |
+|------|------|------|
+| 센서만 | 89.12% | **핵심 정보원** |
+| 이미지만 | 69.56% | 단독 사용 부적합 |
+| +이미지 | +0.5%p | 멀티모달 효과 미미 |
+| +FiLM | +0.7%p | 외부환경 조건화 |
 
-| Trial | Val Acc | 상태 |
-|-------|---------|------|
-| 0 | 88.74% | 완료 |
-| 1 | 89.83% | 완료 |
-| **2** | **90.48%** | **Best** |
-| 3 | 90.09% | 완료 |
-| 4-7 | - | Pruned |
-
-**Pruning 효과**: MedianPruner로 비효율 Trial 조기 종료 → GPU 시간 절약
+**→ "왜 멀티모달?" 실험적으로 답변 완료**
 """)
 
-        st.warning("💡 **발견**: 센서가 지배적(89%), 이미지 기여 미미(+0.5%p). Optuna 튜닝으로도 LightGBM 96.89%를 역전 불가.")
+        with comp_col2:
+            st.markdown("##### DL Tuned 성능 하락 이유")
+            st.markdown("""
+| 항목 | Baseline | Tuned |
+|------|----------|-------|
+| Test Acc | 92.72% | 87.75% |
+| 이미지 프레임 | 30 | **10** |
+| 학습 시간 | 36.3분 | 10.0분 |
+
+> **원인**: 이미지 서브샘플링 (30→10 프레임)
+> - 속도 3.6배 향상 but 정보 손실
+> - Optuna 탐색 범위/Trial 수 제한
+""")
 
         with st.expander("핵심 코드: Optuna objective (Multi-GPU + AMP)"):
             st.code("""def objective(trial):
@@ -553,131 +726,131 @@ with tab2:
     # --- Step 05: LLM 비교 ---
     elif step_idx == 5:
         st.markdown("### 05. LLM 3종 비교 + LangGraph 멀티 에이전트")
-        st.markdown("정확도에서 ML에 밀린 한계를 **해석력**으로 보완합니다.")
 
-        llm_df = pd.DataFrame({
-            "모델": ["Gemini 2.5 Flash", "Gemma-3-4B", "Qwen2.5-3B"],
-            "응답시간(s)": [7.9, 14.6, 8.1],
-            "JSON 출력": ["우수", "불안정", "보통"],
-            "진단 정확도": ["정확하고 간결", "장황하고 부정확", "간결하지만 부정확"],
-            "결과": ["✅ 채택", "❌", "❌"],
-        })
-        st.dataframe(llm_df, use_container_width=True, hide_index=True)
+        # 핵심 결과 요약
+        st.info("**목표**: 정확도에서 ML에 밀린 한계를 **해석력**으로 보완 → Gemini 2.5 Flash 채택")
 
+        # 핵심 metric
+        llm_m1, llm_m2, llm_m3, llm_m4 = st.columns(4)
+        llm_m1.metric("채택 모델", "Gemini 2.5 Flash")
+        llm_m2.metric("응답 시간", "7.9초", help="3종 중 최단")
+        llm_m3.metric("JSON 안정성", "우수", help="Structured Output")
+        llm_m4.metric("LangGraph 실행", "91.5초", help="4-Agent 파이프라인")
+
+        st.divider()
+
+        # 2열 레이아웃: 응답시간 차트 + GPU 제약 테이블
         l_col1, l_col2 = st.columns(2)
         with l_col1:
+            st.markdown("#### LLM 응답 시간 비교")
             fig = px.bar(
                 pd.DataFrame({
                     "모델": ["Gemini 2.5 Flash", "Gemma-3-4B", "Qwen2.5-3B"],
                     "응답시간(s)": [7.9, 14.6, 8.1],
+                    "상태": ["채택", "탈락", "탈락"],
                 }),
-                x="모델", y="응답시간(s)", title="LLM 응답 시간 비교",
+                x="모델", y="응답시간(s)",
                 text="응답시간(s)",
-                color="모델",
-                color_discrete_sequence=["#22C55E", "#EF4444", "#F97316"],
+                color="상태",
+                color_discrete_map={"채택": "#22C55E", "탈락": "#6B7280"},
             )
-            fig.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0),
+            fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
                               paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                               showlegend=False)
             fig.update_traces(textposition="outside")
             st.plotly_chart(fig, use_container_width=True)
 
         with l_col2:
-            st.markdown("#### T4 GPU 제약 → 모델 선택")
+            st.markdown("#### LLM 성능 비교")
+            llm_df = pd.DataFrame({
+                "모델": ["Gemini 2.5 Flash", "Gemma-3-4B", "Qwen2.5-3B"],
+                "응답시간": ["7.9s", "14.6s", "8.1s"],
+                "JSON": ["우수", "불안정", "보통"],
+                "진단 품질": ["정확", "부정확", "부정확"],
+                "결과": ["채택", "-", "-"],
+            })
+            st.dataframe(llm_df, use_container_width=True, hide_index=True, height=200)
+
+        # 실제 진단 응답 비교 - 4개 테스트 케이스
+        st.markdown("#### 실제 진단 응답 비교 (4개 샘플)")
+
+        # 테스트 케이스 선택
+        test_case = st.radio("테스트 케이스", ["정상", "경미", "중간", "심각"], horizontal=True, key="llm_test_case")
+
+        # 각 케이스별 입력 데이터와 응답
+        test_data = {
+            "정상": {
+                "input": "NTC 45°C, CT1 25A, 열화상 max 48°C → 정상 가동 중",
+                "gemini": "설비가 정상 작동 중입니다. 모든 센서값이 정상 범위 내에 있으며, 특별한 조치가 필요하지 않습니다.",
+                "gemma": "정상 상태입니다.",
+                "qwen": "장비 정상 가동 중. 온도 및 전류 정상 범위.",
+            },
+            "경미": {
+                "input": "NTC 58°C, CT1 38A, 열화상 max 65°C → 약간 상승",
+                "gemini": "온도와 전류가 정상 범위 상한에 근접합니다. 모니터링을 강화하고 냉각 시스템을 점검하세요.",
+                "gemma": "온도 상승 감지... (장황한 출력)",
+                "qwen": "경미한 이상 감지. 냉각 점검 권장.",
+            },
+            "중간": {
+                "input": "NTC 72°C, CT1 55A, 열화상 max 82°C → 주의 필요",
+                "gemini": "온도와 전류가 경고 수준입니다. 즉시 부하를 줄이고, 예방 점검을 실시하세요. 방치 시 심각 단계로 진행될 수 있습니다.",
+                "gemma": "이상 감지됨... (불완전한 JSON)",
+                "qwen": "중간 수준 이상. 점검 필요... (반복)",
+            },
+            "심각": {
+                "input": "NTC 0.3°C, CT1 0.0A, 열화상 max 1.0°C → 설비 미가동",
+                "gemini": "장비 미가동 또는 전원 이상 추정. CT 전류 0.0A 및 낮은 온도가 지표. 전원 및 장비 작동 상태를 점검하고 필요 시 전원 공급 조치.",
+                "gemma": "N/A (응답 실패)",
+                "qwen": "장비 온도 제어 불량, CT1 과부하... (반복 문구)",
+            },
+        }
+
+        case = test_data[test_case]
+        st.caption(f"입력: `{case['input']}`")
+
+        llm_tab1, llm_tab2, llm_tab3 = st.tabs(["Gemini 2.5 Flash (채택)", "Gemma-3-4B", "Qwen2.5-3B"])
+        with llm_tab1:
+            st.success(case["gemini"])
+        with llm_tab2:
+            if "N/A" in case["gemma"] or "불완전" in case["gemma"]:
+                st.error(case["gemma"])
+            else:
+                st.warning(case["gemma"])
+        with llm_tab3:
+            st.warning(case["qwen"])
+
+        st.divider()
+
+        # LangGraph - 간소화된 다이어그램
+        lg_col1, lg_col2 = st.columns([2, 3])
+
+        with lg_col1:
+            st.markdown("#### LangGraph 워크플로우")
             st.markdown("""
-| 모델 | VRAM | T4 16GB | 선택 |
-|------|------|---------|------|
-| Gemma-3-12B | ~24GB | ❌ OOM | - |
-| Qwen2.5-7B | ~14GB | 빠듯 | - |
-| **Gemma-3-4B** | ~8GB | ✅ | GPU 0 |
-| **Qwen2.5-3B** | ~6GB | ✅ | GPU 1 |
-
-4B + 3B 조합 = T4 x2에 각각 배치 가능한 최대 크기
-""")
-
-        # 심각 케이스 실제 응답 비교
-        st.divider()
-        st.markdown("#### 실제 진단 응답 비교 (심각 케이스)")
-        st.markdown("입력: `NTC 0.3°C, CT1 0.0A, 열화상 max 1.0°C` → 설비 미가동 추정")
-
-        resp_col1, resp_col2, resp_col3 = st.columns(3)
-        with resp_col1:
-            st.markdown("**Gemini 2.5 Flash** ✅")
-            st.caption("장비 미가동 또는 전원 이상 추정. CT 전류 0.0A 및 낮은 온도가 지표. 전원 및 장비 작동 상태를 점검하고 필요 시 전원 공급 조치.")
-        with resp_col2:
-            st.markdown("**Gemma-3-4B** ❌")
-            st.caption("응답 실패 (N/A)")
-        with resp_col3:
-            st.markdown("**Qwen2.5-3B** △")
-            st.caption("장비 온도 제어 불량, CT1 과부하... (반복 문구, 품질 낮음)")
-
-        st.info("💡 **발견**: Gemini 2.5 Flash가 속도/품질/안정성 모두 1위. LLM은 정확도가 아닌 **해석력** 보완 역할.")
-
-        # LangGraph 멀티 에이전트
-        st.divider()
-        st.markdown("#### LangGraph 멀티 에이전트 워크플로우")
-        st.markdown("단순 LLM 호출이 아닌, 실제 유지보수 프로세스를 반영한 **에이전트 오케스트레이션**.")
-
-        st.markdown("""
 ```
-         ┌─────────┐
-         │  START  │
-         └────┬────┘
-              v
-       ┌──────────────┐
-       │   Analyzer   │  ← 센서 데이터 정상/이상 분석
-       └──────┬───────┘
-              v
-       ┌──────────────┐
-       │  Diagnoser   │  ← 이상 원인 추정 (3가지 이내)
-       └──────┬───────┘
-              v
-       ┌──────────────┐
-       │   Advisor    │  ← 유지보수 조치 추천
-       └──────┬───────┘
-              v
-       ┌──────────────┐
-       │   Reviewer   │  ← 진단 품질 검증
-       └──────┬───────┘
-              │
-     ┌────────┴────────┐
-     │                 │
-   REVISE           APPROVE
-     │                 │
-     v                 v
-  Diagnoser        Finalize
-  (재진단)         (리포트 생성)
+START → Analyzer → Diagnoser → Advisor → Reviewer
+                       ↑                      ↓
+                       └──── REVISE ←─────────┤
+                                              ↓
+                                           Finalize
 ```
+**조건부 라우팅**: Reviewer → APPROVE(종료) / REVISE(재진단)
 """)
 
-        st.markdown("""
-| 에이전트 | 역할 | 출력 |
-|----------|------|------|
-| **Analyzer** | 센서 데이터 정상/이상 판정 | 각 센서별 분석 |
-| **Diagnoser** | 이상 원인 추정 (3가지 이내) | 원인 목록 |
-| **Advisor** | 즉시/예방/점검 조치 추천 | 조치 사항 |
-| **Reviewer** | 진단 품질 검증 → APPROVE 또는 REVISE | 품질 게이트 |
+        with lg_col2:
+            st.markdown("#### 에이전트 역할")
+            agent_df = pd.DataFrame({
+                "에이전트": ["Analyzer", "Diagnoser", "Advisor", "Reviewer"],
+                "역할": ["센서 정상/이상 판정", "이상 원인 추정", "유지보수 조치 추천", "진단 품질 검증"],
+                "출력": ["센서별 분석", "원인 목록 (3개)", "조치 사항", "APPROVE/REVISE"],
+            })
+            st.dataframe(agent_df, use_container_width=True, hide_index=True, height=180)
 
-> **실행 결과**: Reviewer가 1회 REVISE → 자동 재진단 → 최종 APPROVE (총 91.5초)
-""")
+        st.success("**실행 결과**: Reviewer가 1회 REVISE → 자동 재진단 → 최종 APPROVE (총 91.5초)")
 
-        with st.expander("핵심 코드: LangGraph StateGraph 구성"):
+        with st.expander("핵심 코드: LangGraph StateGraph 구성", expanded=False):
             st.code("""from langgraph.graph import StateGraph, END
 
-class DiagnosisState(TypedDict):
-    sensor_data: dict; thermal_data: dict
-    analysis: str; diagnosis: str; advice: str
-    review: str; review_count: int; final_report: str
-
-def should_continue(state: DiagnosisState) -> str:
-    \"\"\"Conditional routing: max 2 revisions\"\"\"
-    if state['review_count'] >= 2:
-        return 'end'
-    if 'APPROVE' in state['review'].upper():
-        return 'end'
-    return 'revise'
-
-# Build workflow graph
 workflow = StateGraph(DiagnosisState)
 workflow.add_node('analyzer', analyzer_node)
 workflow.add_node('diagnoser', diagnoser_node)
@@ -729,19 +902,22 @@ app = workflow.compile()""", language="python")
 | **결론** | **✅ 단일 모델이 최적** | 성능 이득 없이 복잡도만 증가 |
 """)
 
-        # Weighted Voting 가중치 분포
+        # Weighted Voting 가중치 분포 - 시각화
         st.markdown("#### Weighted Voting 가중치 분포")
-        st.markdown("""
-```
-LightGBM:     0.1706  ─────────────────
-XGBoost:      0.1707  ─────────────────
-CatBoost:     0.1699  ─────────────────
-RandomForest: 0.1698  ─────────────────
-Baseline CNN: 0.1640  ────────────────
-Tuned CNN:    0.1550  ───────────────
-```
-> ML 4종이 거의 균등한 가중치 → DL의 기여도가 낮아 앙상블 효과 제한적
-""")
+        weight_df = pd.DataFrame({
+            "모델": ["XGBoost", "LightGBM", "CatBoost", "RandomForest", "Baseline CNN", "Tuned CNN"],
+            "가중치": [0.1707, 0.1706, 0.1699, 0.1698, 0.1640, 0.1550],
+            "유형": ["ML", "ML", "ML", "ML", "DL", "DL"],
+        })
+        fig = px.bar(weight_df, x="가중치", y="모델", color="유형", orientation="h",
+                     color_discrete_map={"ML": "#3B82F6", "DL": "#F59E0B"},
+                     text=weight_df["가중치"].apply(lambda x: f"{x:.4f}"))
+        fig.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                          xaxis_range=[0.14, 0.18], legend=dict(orientation="h", y=-0.15))
+        fig.update_traces(textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("ML 4종이 거의 균등한 가중치 (0.17) → DL의 기여도가 낮아 (0.15~0.16) 앙상블 효과 제한적")
 
         st.warning("💡 **발견**: Stacking 앙상블도 96.89%로 LightGBM과 동률. 복잡도만 증가하고 성능 이득 없음 → 단일 LightGBM이 최적.")
 
@@ -749,141 +925,181 @@ Tuned CNN:    0.1550  ───────────────
     elif step_idx == 7:
         st.markdown("### 07. 최종 결론: 13개 모델 종합 비교")
 
+        # 상단 hero 섹션 - 핵심 메시지
+        st.success("**최종 결과**: LightGBM **96.89%** (ML) > Stacking 96.89% (Ensemble) > CNN **93.24%** (DL)")
+
+        # 핵심 metric 요약
+        hero_col1, hero_col2, hero_col3, hero_col4 = st.columns(4)
+        hero_col1.metric("ML 최고", "96.89%", help="LightGBM")
+        hero_col2.metric("DL 최고", "93.24%", delta="-3.65%p", delta_color="inverse", help="CNN+Transformer")
+        hero_col3.metric("앙상블", "96.89%", delta="동률", delta_color="off", help="Stacking")
+        hero_col4.metric("학습 속도 차이", "800x", help="LightGBM 2.7s vs DL 2178s")
+
+        st.divider()
+
         csv_path = PROJECT_ROOT / "data" / "results" / "final" / "final_comparison.csv"
 
-        if csv_path.exists():
-            df = pd.read_csv(csv_path)
-            df = df.sort_values("Test_Acc", ascending=True).reset_index(drop=True)
+        # 2x2 그리드 레이아웃
+        row1_col1, row1_col2 = st.columns(2)
 
-            fig = px.bar(
-                df,
-                x="Test_Acc",
-                y="Model",
-                color="Type",
-                orientation="h",
-                title="13개 모델 Test Accuracy (%)",
-                color_discrete_map={"ML": "#3B82F6", "DL": "#8B5CF6", "Ensemble": "#10B981"},
-                text=df["Test_Acc"].apply(lambda x: f"{x:.2f}%"),
-            )
+        with row1_col1:
+            st.markdown("#### 13개 모델 순위")
+            if csv_path.exists():
+                df = pd.read_csv(csv_path)
+                df = df.sort_values("Test_Acc", ascending=True).reset_index(drop=True)
+
+                fig = px.bar(
+                    df, x="Test_Acc", y="Model", color="Type", orientation="h",
+                    color_discrete_map={"ML": "#3B82F6", "DL": "#8B5CF6", "Ensemble": "#10B981"},
+                    text=df["Test_Acc"].apply(lambda x: f"{x:.2f}%"),
+                )
+                fig.update_layout(
+                    height=380, margin=dict(l=0, r=0, t=10, b=0),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    yaxis_title="", xaxis_title="Test Accuracy (%)", xaxis_range=[85, 98],
+                    legend=dict(orientation="h", y=-0.12),
+                )
+                fig.update_traces(textposition="outside")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning(f"파일을 찾을 수 없습니다: {csv_path}")
+
+        with row1_col2:
+            st.markdown("#### 정확도 vs 학습 시간")
+            type_colors = {"ML": "#3B82F6", "DL": "#F59E0B", "Ensemble": "#10B981"}
+            scatter_data = pd.DataFrame([
+                {"Model": "LightGBM", "Type": "ML", "Acc": 96.89, "Time": 2.7},
+                {"Model": "XGBoost", "Type": "ML", "Acc": 96.70, "Time": 3.8},
+                {"Model": "CatBoost", "Type": "ML", "Acc": 96.46, "Time": 21.5},
+                {"Model": "RandomForest", "Type": "ML", "Acc": 95.58, "Time": 3.7},
+                {"Model": "DL Baseline", "Type": "DL", "Acc": 93.24, "Time": 2178},
+                {"Model": "DL Tuned", "Type": "DL", "Acc": 87.75, "Time": 600},
+                {"Model": "Stacking", "Type": "Ensemble", "Acc": 96.89, "Time": 10},
+            ])
+            fig = px.scatter(scatter_data, x="Time", y="Acc", color="Type",
+                             text="Model", log_x=True, size_max=14,
+                             color_discrete_map=type_colors,
+                             labels={"Time": "학습 시간 (초, log)", "Acc": "Test Accuracy (%)"})
+            fig.update_traces(textposition="top center", marker=dict(size=12))
             fig.update_layout(
-                height=500,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis_title="",
-                xaxis_title="Test Accuracy (%)",
-                xaxis_range=[85, 98],
+                height=380, margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                yaxis=dict(range=[85, 98]),
+                legend=dict(orientation="h", y=-0.12),
             )
-            fig.update_traces(textposition="outside")
             st.plotly_chart(fig, use_container_width=True)
 
-            display_df = df.sort_values("Test_Acc", ascending=False).reset_index(drop=True)
-            display_df["Rank"] = range(1, len(display_df) + 1)
-            table_df = display_df[["Rank", "Model", "Type", "Test_Acc", "Test_F1", "Train_Time"]].copy()
-            table_df.columns = ["순위", "모델", "유형", "정확도 (%)", "F1 (%)", "학습시간 (s)"]
-            table_df["정확도 (%)"] = table_df["정확도 (%)"].apply(lambda x: f"{x:.2f}")
-            table_df["F1 (%)"] = table_df["F1 (%)"].apply(lambda x: f"{x:.2f}")
-            st.dataframe(table_df, use_container_width=True, hide_index=True)
-        else:
-            st.warning(f"파일을 찾을 수 없습니다: {csv_path}")
+        # 2행: 성능 스토리 + 레이더 차트
+        row2_col1, row2_col2 = st.columns(2)
 
-        st.divider()
-
-        # 성능 향상 스토리 라인 차트
-        st.markdown("#### 성능 향상 스토리")
-        import plotly.graph_objects as go
-
-        story_data = pd.DataFrame({
-            "단계": ["02: DL Baseline", "04: DL Tuned", "03: XGBoost", "06: Stacking"],
-            "Acc": [93.24, 87.75, 96.70, 96.89],
-            "색상": ["#F59E0B", "#F59E0B", "#3B82F6", "#EF4444"],
-        })
-        fig = go.Figure(go.Scatter(
-            x=list(range(4)), y=story_data["Acc"],
-            mode="lines+markers+text",
-            text=[f"{m}<br>{a:.1f}%" for m, a in zip(story_data["단계"], story_data["Acc"])],
-            textposition="top center",
-            marker=dict(size=14, color=story_data["색상"].tolist()),
-            line=dict(width=2, color="#6B7280"),
-        ))
-        fig.update_layout(
-            height=350, margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(tickvals=list(range(4)), ticktext=story_data["단계"].tolist()),
-            yaxis_title="Test Accuracy (%)",
-            yaxis=dict(range=[83, 100]),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Accuracy vs Training Time 산점도 (노트북 07)
-        st.markdown("#### 정확도 vs 학습 시간")
-        type_colors = {"ML": "#3B82F6", "DL": "#F59E0B", "Ensemble": "#10B981"}
-        scatter_data = pd.DataFrame([
-            {"Model": "LightGBM", "Type": "ML", "Acc": 96.89, "Time": 2.7},
-            {"Model": "XGBoost", "Type": "ML", "Acc": 96.70, "Time": 3.8},
-            {"Model": "CatBoost", "Type": "ML", "Acc": 96.46, "Time": 21.5},
-            {"Model": "RandomForest", "Type": "ML", "Acc": 95.58, "Time": 3.7},
-            {"Model": "DL Baseline", "Type": "DL", "Acc": 93.24, "Time": 2178},
-            {"Model": "DL Tuned", "Type": "DL", "Acc": 87.75, "Time": 600},
-            {"Model": "Stacking", "Type": "Ensemble", "Acc": 96.89, "Time": 10},
-        ])
-        fig = px.scatter(scatter_data, x="Time", y="Acc", color="Type",
-                         text="Model", log_x=True, size_max=14,
-                         color_discrete_map=type_colors,
-                         labels={"Time": "학습 시간 (초, log)", "Acc": "Test Accuracy (%)"})
-        fig.update_traces(textposition="top center", marker=dict(size=12))
-        fig.update_layout(
-            height=350, margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            yaxis=dict(range=[85, 98]),
-            legend=dict(orientation="h", y=-0.15),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # 레이더 차트 — Top 3 모델 다차원 비교
-        st.markdown("#### 다차원 비교 (레이더 차트)")
-        categories = ["정확도", "학습 속도", "해석 가능성", "모델 경량성", "멀티모달"]
-        radar_models = [
-            {"name": "LightGBM (ML)", "vals": [3.96, 5.0, 5.0, 3.0, 2.0], "color": "#3B82F6"},
-            {"name": "CNN+Transformer (DL)", "vals": [2.75, 1.5, 1.5, 1.5, 5.0], "color": "#F59E0B"},
-            {"name": "Stacking (Ensemble)", "vals": [3.96, 2.0, 3.0, 5.0, 4.0], "color": "#EF4444"},
-        ]
-        fig = go.Figure()
-        for rm in radar_models:
-            fig.add_trace(go.Scatterpolar(
-                r=rm["vals"] + [rm["vals"][0]],
-                theta=categories + [categories[0]],
-                fill="toself", name=rm["name"], opacity=0.5,
-                line=dict(color=rm["color"], width=2),
+        with row2_col1:
+            st.markdown("#### 성능 향상 스토리")
+            story_data = pd.DataFrame({
+                "단계": ["DL Baseline", "DL Tuned", "XGBoost", "Stacking"],
+                "Acc": [93.24, 87.75, 96.70, 96.89],
+                "색상": ["#F59E0B", "#F59E0B", "#3B82F6", "#10B981"],
+            })
+            fig = go.Figure(go.Scatter(
+                x=list(range(4)), y=story_data["Acc"],
+                mode="lines+markers+text",
+                text=[f"{a:.1f}%" for a in story_data["Acc"]],
+                textposition="top center",
+                marker=dict(size=14, color=story_data["색상"].tolist()),
+                line=dict(width=2, color="#6B7280"),
             ))
-        fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
-            height=450, margin=dict(l=40, r=40, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)",
-            legend=dict(orientation="h", y=-0.1),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(
+                height=320, margin=dict(l=0, r=0, t=10, b=30),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(tickvals=list(range(4)), ticktext=story_data["단계"].tolist()),
+                yaxis_title="Test Accuracy (%)", yaxis=dict(range=[83, 100]),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with row2_col2:
+            st.markdown("#### 다차원 비교")
+            categories = ["정확도", "학습 속도", "해석 가능성", "모델 경량성", "멀티모달"]
+            radar_models = [
+                {"name": "LightGBM", "vals": [3.96, 5.0, 5.0, 3.0, 2.0], "color": "#3B82F6"},
+                {"name": "CNN+Transformer", "vals": [2.75, 1.5, 1.5, 1.5, 5.0], "color": "#F59E0B"},
+                {"name": "Stacking", "vals": [3.96, 2.0, 3.0, 5.0, 4.0], "color": "#10B981"},
+            ]
+            fig = go.Figure()
+            for rm in radar_models:
+                fig.add_trace(go.Scatterpolar(
+                    r=rm["vals"] + [rm["vals"][0]],
+                    theta=categories + [categories[0]],
+                    fill="toself", name=rm["name"], opacity=0.5,
+                    line=dict(color=rm["color"], width=2),
+                ))
+            fig.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
+                height=320, margin=dict(l=30, r=30, t=10, b=30),
+                paper_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", y=-0.15),
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
 
-        st.markdown("#### 최종 배포 전략")
-        st.success("""**최종 결론: 3-모델 협업 구조**
-
-| 역할 | 모델 | 이유 |
-|------|------|------|
-| **정확도 (예측)** | LightGBM (96.89%) | 센서 피처 기반 최고 정확도 |
-| **멀티모달 (배포)** | CNN+Transformer (93.24%) | 열화상 이미지 직접 처리 가능 |
-| **해석력 (진단)** | Gemini 2.5 Flash | 센서 데이터 해석 + 조치 추천 |
+        # ML vs DL 분석
+        why_col1, why_col2 = st.columns(2)
+        with why_col1:
+            st.markdown("#### ML이 DL보다 높은 이유")
+            st.markdown("""
+| 원인 | 설명 |
+|------|------|
+| **피처 엔지니어링** | 시계열 통계 피처 (mean, std, min, max) 가 핵심 정보 압축 |
+| **데이터 규모** | 7,311개 → DL 학습에 불충분 |
+| **정형 데이터 강점** | 센서 데이터는 트리 기반 ML에 유리 |
 """)
 
-        st.markdown("""
-**배포 모델 선택 근거:**
+        with why_col2:
+            st.markdown("#### 핵심 교훈")
+            st.markdown("""
+| 항목 | 내용 |
+|------|------|
+| ML vs DL | 정형 데이터 + 피처 엔지니어링 → **ML 우세** |
+| 앙상블 | 만능 아님, **모델 다양성이 핵심** |
+| 멀티모달 | Ablation으로 효과 입증 (+1.2%p) |
+| 프로덕션 | **LightGBM 단독이 최적** (간단+빠름+정확) |
+""")
 
-| 항목 | CNN+Transformer (배포) | LightGBM (최고 정확도) |
-|------|------------------------|----------------------|
-| **정확도** | 93.24% | 96.89% |
-| **멀티모달** | 센서 + 열화상 + 외부환경 | 센서만 (피처 추출 필요) |
-| **열화상 처리** | CNN으로 직접 처리 | 불가능 |
-| **선택 이유** | 열화상 이미지를 직접 활용할 수 있어 실제 환경에서 더 유리 | - |
+        st.divider()
+
+        # 프로덕션 배포 전략 3단계
+        st.markdown("#### 프로덕션 배포 전략")
+        phase_col1, phase_col2, phase_col3 = st.columns(3)
+        with phase_col1:
+            st.info("""**Phase 1: LightGBM 단독**
+- 빠른 추론 (2.7초)
+- SHAP 해석 가능
+- 3.1MB 경량
+- 96.89% 정확도
+""")
+        with phase_col2:
+            st.warning("""**Phase 2: DL 대안 (옵션)**
+- CNN+Transformer
+- 멀티모달 직접 처리
+- 열화상 이미지 활용
+- 93.24% 정확도
+""")
+        with phase_col3:
+            st.success("""**Phase 3: LLM 진단 연동**
+- Gemini 2.5 Flash API
+- 자연어 진단 리포트
+- LangGraph 멀티 에이전트
+- 센서 해석 + 조치 추천
+""")
+
+        with st.expander("배포 모델 선택 근거 상세"):
+            st.markdown("""
+| 항목 | LightGBM (ML) | CNN+Transformer (DL) | Stacking (Ensemble) |
+|------|---------------|----------------------|---------------------|
+| Test Acc | **96.89%** | 92.72% | 96.89% |
+| 모델 크기 | 3.1 MB | 16.5 MB | 1 KB |
+| 학습 속도 | 2.7초 | 36.3분 | - |
+| 해석 가능성 | SHAP 지원 | 블랙박스 | 부분 가능 |
+| 멀티모달 | 피처 추출 필요 | **직접 처리** | - |
 """)
 
 
