@@ -4,8 +4,8 @@
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0-red)
-![Next.js](https://img.shields.io/badge/Next.js-15-black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100-green)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.30-FF4B4B)
 
 ## 프로젝트 개요
 
@@ -28,14 +28,14 @@ ConveyorGuard는 제조현장의 이송장치(OHT/AGV) 열화 상태를 **멀티
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Frontend   │────▶│   ML API    │◀───▶│ LLM Service │
-│  (Next.js)  │     │  (FastAPI)  │     │  (Gemini)   │
-│  Port 3000  │     │  Port 8000  │     │  Port 8001  │
+│  Demo UI    │     │   ML API    │◀───▶│ LLM Service │
+│ (Streamlit) │     │  (FastAPI)  │     │  (Gemini)   │
+│  Port 8501  │     │  Port 8000  │     │  Port 8001  │
 └─────────────┘     └──────┬──────┘     └─────────────┘
                           │
                    ┌──────▼──────┐
-                   │  ML Model   │
-                   │   XGBoost   │
+                   │  DL Model   │
+                   │CNN+Trans.   │
                    └─────────────┘
 ```
 
@@ -45,14 +45,14 @@ ConveyorGuard는 제조현장의 이송장치(OHT/AGV) 열화 상태를 **멀티
 
 | 분류 | 기술 |
 |------|------|
-| **Frontend** | Next.js 15, TypeScript, TailwindCSS, Recharts |
-| **ML API** | FastAPI, PyTorch, Python 3.11 |
+| **Demo UI** | Streamlit, Plotly |
+| **ML API** | FastAPI, Uvicorn, Python 3.11 |
+| **Deep Learning** | PyTorch (Multimodal CNN + Transformer) |
 | **LLM** | Google Gemini 2.5 Flash, LangChain, LangGraph |
-| **ML Models** | XGBoost, LightGBM, RandomForest, CatBoost |
-| **Deep Learning** | Multimodal CNN + Transformer |
-| **Database** | Supabase (PostgreSQL) |
+| **RAG** | FAISS, Sentence-Transformers |
+| **ML Models (실험)** | LightGBM, XGBoost, CatBoost, RandomForest, scikit-learn |
+| **Infra** | Docker, Docker Compose, Git |
 | **Data** | AIHub #71802 (센서 + 열화상 + 환경) |
-| **Infra** | Docker, Git |
 
 ---
 
@@ -139,20 +139,9 @@ ConveyorGuard/
 │       ├── core/          # Gemini, 프롬프트, RAG
 │       └── tools/         # 진단 도구
 │
-├── frontend/              # Next.js 프론트엔드
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx           # 대시보드
-│       │   └── equipment/[id]/    # 장비 상세
-│       ├── components/
-│       │   ├── dashboard/         # StatusCard, SensorGauge 등
-│       │   ├── layout/            # AppShell, Header, Sidebar
-│       │   └── ui/                # Toast, Skeleton
-│       └── lib/api.ts
-│
-├── ml-service/            # 모델 학습 코드
-│   ├── models/            # 학습된 모델 (.pkl)
-│   └── outputs/           # 시각화 결과
+├── streamlit-demo/        # 연구 포트폴리오 데모 (Streamlit)
+│   ├── app.py             # 메인 앱 (실험 여정 시각화)
+│   └── requirements.txt
 │
 ├── notebooks/             # Kaggle 학습 노트북
 │   ├── 00_eda.ipynb               # 탐색적 데이터 분석
@@ -195,15 +184,15 @@ cd llm-service
 uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 
-### 3. Frontend 실행
+### 3. Demo UI 실행
 ```bash
-cd frontend
-npm install
-npm run dev
+cd streamlit-demo
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
 ### 4. 접속
-- Frontend: http://localhost:3000
+- Demo UI: http://localhost:8501
 - ML API Docs: http://localhost:8000/docs
 - LLM API Docs: http://localhost:8001/docs
 
@@ -226,7 +215,7 @@ npm run dev
 
 ## 향후 계획
 
-- [ ] 인증 서비스 (Spring Boot / NextAuth)
+- [ ] 인증 서비스 (JWT 기반)
 - [ ] RAG 유사 사례 검색 고도화
 - [ ] WebSocket 실시간 센서 연결
 - [ ] Docker Compose 통합 배포

@@ -10,7 +10,7 @@
 
 | 구분 | 계획 | 실제 구현 | 상태 |
 |------|------|----------|------|
-| **Frontend** | Next.js 15 + TailwindCSS | 1,171줄 | :green_circle: 완료 |
+| **Demo UI** | Streamlit + Plotly | ~1,100줄 | :green_circle: 완료 |
 | **ML API** | FastAPI + 추론 | 784줄 | :green_circle: 완료 |
 | **LLM Service** | Gemini + RAG | 884줄 | :green_circle: 완료 |
 | **ML Service** | 모델 아키텍처 + 학습 | 3,411줄 | :yellow_circle: 재학습 중 |
@@ -21,7 +21,7 @@
 | 서비스 | 줄 수 | 비율 |
 |--------|-------|------|
 | ml-service | 3,411 | 54.6% |
-| frontend | 1,171 | 18.7% |
+| streamlit-demo | ~1,100 | 17.6% |
 | llm-service | 884 | 14.1% |
 | conveyorguard-api | 784 | 12.5% |
 | **총계** | **6,250** | 100% |
@@ -32,15 +32,9 @@
 
 ```
 ConveyorGuard/
-├── frontend/                    # Next.js 프론트엔드
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx                # 대시보드
-│       │   └── equipment/[id]/page.tsx # 장비 상세 + AI 진단
-│       ├── components/
-│       │   ├── dashboard/              # StatusCard, SensorGauge 등
-│       │   └── ui/                     # Toast, Skeleton
-│       └── lib/api.ts                  # API 클라이언트
+├── streamlit-demo/              # 연구 포트폴리오 데모 (Streamlit)
+│   ├── app.py                   # 메인 앱 (실험 여정 시각화)
+│   └── requirements.txt
 │
 ├── llm-service/                 # LLM 진단 서비스 (Port 8001)
 │   ├── .env                     # GEMINI_API_KEY
@@ -74,43 +68,22 @@ ConveyorGuard/
 
 ---
 
-## 3. Frontend 상세
+## 3. Demo UI 상세 (Streamlit)
 
 ### 3.1 파일 구조
 
 | 파일 | 설명 | 줄 수 |
 |------|------|-------|
-| `app/page.tsx` | 대시보드 메인 | 206 |
-| `app/equipment/[id]/page.tsx` | 장비 상세 + AI 진단 | 302 |
-| `components/dashboard/*` | StatusCard, SensorGauge 등 | 348 |
-| `components/ui/*` | Toast, Skeleton | 125 |
-| `lib/api.ts` | ML + LLM API 클라이언트 | 93 |
-| `types/index.ts` | TypeScript 타입 정의 | 44 |
+| `streamlit-demo/app.py` | 메인 Streamlit 앱 | ~1,100 |
+| `streamlit-demo/requirements.txt` | 의존성 (streamlit, plotly, pandas, numpy) | 4 |
+| `streamlit-demo/.streamlit/config.toml` | 테마 및 서버 설정 | - |
 
 ### 3.2 주요 기능
 
-- 장비 상태 카드 (실시간)
-- 센서 게이지 + 트렌드 차트
-- 열화상 히트맵
-- AI 진단 리포트 표시
-- 진단 히스토리 (localStorage, 최대 100건)
-- 토스트 알림
-
-### 3.3 API 클라이언트
-
-```typescript
-// ML API (Port 8000)
-const API_BASE = "http://localhost:8000";
-- fetchHealth()
-- fetchModelInfo()
-- predictTest()
-- predict(data)
-
-// LLM API (Port 8001)
-const LLM_API_BASE = "http://localhost:8001";
-- requestDiagnosis(request)
-- checkLLMHealth()
-```
+- 프로젝트 개요 탭: 클래스 분포, 멀티모달 입력 설명
+- 실험 여정 탭: 8단계 실험을 인터랙티브 Plotly 차트로 시각화
+- 모델 성능 비교 차트 (13개 모델)
+- Confusion Matrix, 학습 곡선 등 실험 결과 표시
 
 ---
 
@@ -291,20 +264,14 @@ Raw Data (30 timesteps)
 | OHT-004 | OHT | FAB2-Zone B | 중간 |
 | OHT-005 | OHT | FAB2-Zone C | 정상 |
 
-### 8.2 진단 이력 설정
-
-- **저장 위치**: localStorage (브라우저)
-- **최대 보관 건수**: 100건 (장비별)
-- **저장 키 형식**: `diagnosis_history_{equipmentId}`
-
-### 8.3 사용자 관리
+### 8.2 사용자 관리
 
 - **현재**: 단일 사용자 (인증 없음)
-- **향후 계획**: Spring Boot 인증 서비스
+- **향후 계획**: JWT 기반 인증 서비스
 
-### 8.4 알림 기능
+### 8.3 알림 기능
 
-- **현재**: Toast 팝업만 구현 (브라우저 내)
+- **현재**: 미구현
 - **향후 계획**: WebSocket 실시간 알림
 
 ---
@@ -324,10 +291,11 @@ cd llm-service
 uvicorn app.main:app --port 8001
 ```
 
-### Frontend (Port 3000)
+### Demo UI (Port 8501)
 ```bash
-cd frontend
-npm run dev
+cd streamlit-demo
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
 ---
@@ -341,7 +309,7 @@ npm run dev
 | Phase 3 | ML 모델 학습 | 70% | :yellow_circle: 재학습 중 |
 | Phase 4 | API 서버 구현 | 100% | :green_circle: 완료 |
 | Phase 5 | LLM 진단 | 100% | :green_circle: 완료 |
-| Phase 6 | Frontend | 90% | :green_circle: 완료 |
+| Phase 6 | Demo UI (Streamlit) | 100% | :green_circle: 완료 |
 
 ---
 

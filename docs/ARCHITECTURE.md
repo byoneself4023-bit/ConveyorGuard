@@ -8,10 +8,11 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│       Frontend (Next.js 15 + React 19)                   │
-│  /  (Dashboard)    /equipment/[id]  (상세/진단)          │
+│       Demo UI (Streamlit + Plotly)                        │
+│  연구 포트폴리오: 8단계 실험 여정 인터랙티브 시각화          │
+│  Port 8501                                               │
 └─────────────────────────────────────────────────────────┘
-              ↓ fetch (REST)           ↓ fetch (REST)
+
 ┌────────────────────────┐   ┌────────────────────────────┐
 │   ML API (FastAPI)     │   │   LLM Service (FastAPI)    │
 │   Port 8000            │   │   Port 8001                │
@@ -30,9 +31,8 @@
 ┌─────────────────────────────────────────────────────────┐
 │                 Data / Model Layer                        │
 │  - PyTorch Checkpoint (.pt)                              │
-│  - XGBoost/LightGBM (.pkl) - ML Service                 │
+│  - XGBoost/LightGBM (.pkl) - 노트북 실험                 │
 │  - In-memory Case DB (JSON) - RAG                       │
-│  - localStorage (진단 히스토리) - Frontend               │
 │  - MLFlow (실험 추적)                                    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -41,13 +41,11 @@
 
 | 항목 | Listify | ConveyorGuard |
 |------|---------|---------------|
-| **프론트엔드** | React (Vite, SPA) | Next.js 15 (App Router, SSR가능) |
+| **프론트엔드** | React (Vite, SPA) | Streamlit + Plotly (Python 기반 데모 UI) |
 | **백엔드** | Flask (단일 서버) | FastAPI × 2 (ML + LLM 마이크로서비스) |
-| **DB** | MySQL + Connection Pool | 없음 (모델 파일 + Mock 데이터 + localStorage) |
+| **DB** | MySQL + Connection Pool | 없음 (모델 파일 + In-memory 데이터) |
 | **인증** | JWT + bcrypt + Role | 없음 (인증 미구현) |
-| **외부 API** | Spotify API | Google Gemini API + Spotify-like 없음 |
-| **상태관리** | React Hooks (Props drilling) | React Hooks + Next.js useRouter/useParams |
-| **라우팅** | view 상태 전환 | Next.js App Router (파일 기반 라우팅) |
+| **외부 API** | Spotify API | Google Gemini API |
 | **핵심 도메인** | 음악 플레이리스트 CRUD | AI 예측 + 실시간 모니터링 + 자연어 진단 |
 
 ---
@@ -1123,591 +1121,63 @@ def train_with_mlflow(model_name="xgboost", experiment_name="conveyorguard-ml"):
 
 ---
 
-# PART 4: 프론트엔드 (Next.js 15 + React 19 + TypeScript)
+# PART 4: Demo UI (Streamlit)
+
+> 초기 계획에서는 Next.js 15 프론트엔드를 설계했으나, 연구 포트폴리오 성격에 맞춰
+> Streamlit 기반 인터랙티브 데모로 전환했습니다.
 
 ---
 
-## 17. 프론트엔드 개요
+## 17. Demo UI 개요
 
 ```
-프레임워크: Next.js 15 (App Router)
-React:      19.2.3
-TypeScript: 5
-스타일:     TailwindCSS 4 + CSS Variables (다크 테마)
-차트:       Recharts 3.6.0
-아이콘:     Lucide React
-클래스:     clsx (조건부 클래스)
-라우팅:     파일 기반 (App Router)
-상태관리:   React Hooks (useState, useEffect)
-데이터:     Mock Data (하드코딩) + localStorage
-```
-
-### Listify와 비교
-
-```
-Listify                             ConveyorGuard
-───────                             ─────────────
-React (Vite, SPA)                   Next.js 15 (App Router)
-view 상태로 페이지 전환               파일 기반 라우팅 (/equipment/[id])
-Props drilling                      Props drilling (동일)
-fetch (api.ts 래퍼)                  fetch (api.ts 직접 호출)
-localStorage (토큰)                 localStorage (진단 히스토리)
-Tailwind + Lucide                   Tailwind + Lucide + Recharts (동일)
+프레임워크: Streamlit 1.30+
+시각화:     Plotly 5.18+ (인터랙티브 차트)
+데이터:     pandas, numpy
+포트:       8501
+파일:       streamlit-demo/app.py (약 1,100줄)
 ```
 
 ---
 
-## 18. 타입 정의 (types/index.ts)
+## 18. Streamlit 앱 구조 (streamlit-demo/app.py)
 
-```typescript
-// === 열화 상태 ===
-export type DegradationState = 0 | 1 | 2 | 3;
+### 18.1 탭 구성
 
-// === 장비 ===
-export interface Equipment {
-    id: string;                    // "OHT-001"
-    name: string;                  // "OHT-001"
-    type: "OHT" | "AGV";
-    state: DegradationState;       // 0=정상, 1=경미, 2=중간, 3=심각
-    confidence: number;
-    sensors: SensorData;
-    lastInspection: string;
-    updatedAt: string;
-}
+| 탭 | 내용 |
+|-----|------|
+| 프로젝트 개요 | 클래스 분포 시각화, 멀티모달 입력 설명, 연구 흐름도 |
+| 실험 여정 | 8단계 실험 과정을 인터랙티브 Plotly 차트로 시각화 |
 
-// === 센서 데이터 ===
-export interface SensorData {
-    ntc: number;       // NTC 온도 (°C)
-    pm1_0: number;     // PM1.0 (μg/m³)
-    pm2_5: number;     // PM2.5
-    pm10: number;      // PM10
-    ct1: number;       // 전류1 (A)
-    ct2: number;       // 전류2
-    ct3: number;       // 전류3
-    ct4: number;       // 전류4
-}
+### 18.2 실험 여정 8단계
 
-// === 예측 응답 ===
-export interface PredictResponse {
-    prediction: DegradationState;
-    label: string;               // "정상" / "경미한 열화" / ...
-    confidence: number;          // 0~1
-    probabilities: number[];     // [0.9, 0.05, 0.03, 0.02]
-}
+| 단계 | 실험 | 주요 시각화 |
+|------|------|------------|
+| 00_EDA | 111,870 프레임 데이터 탐색 | 클래스 분포, 센서 상관관계 |
+| 01_Preprocessing | 슬라이딩 윈도우, 세션 기반 분리 | 데이터 분할 비율 |
+| 02_DL_Baseline | CNN+Transformer (93.24%) | 학습 곡선, Confusion Matrix |
+| 03_ML_Comparison | 8개 ML 모델 비교 | 모델별 성능 비교 차트 |
+| 04_DL_Tuning | Optuna 튜닝 + Ablation Study | 모달리티별 기여도 |
+| 05_LLM_Comparison | Gemini vs Gemma-3 vs Qwen2.5 | LLM 진단 품질 비교 |
+| 06_Ensemble | Stacking/Voting 비교 | 앙상블 성능 비교 |
+| 07_Final_Comparison | 13개 모델 종합 비교 | 최종 성능 순위 차트 |
 
-// === 상수 매핑 ===
-export const STATE_LABELS: Record<DegradationState, string> = {
-    0: "정상",
-    1: "경미한 열화",
-    2: "중간 열화",
-    3: "심각한 열화",
-};
+### 18.3 사용 라이브러리
 
-export const STATE_COLORS: Record<DegradationState, string> = {
-    0: "status-normal",     // #10B981
-    1: "status-minor",      // #F59E0B
-    2: "status-moderate",   // #F97316
-    3: "status-severe",     // #EF4444
-};
+```python
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from pathlib import Path
 ```
 
----
-
-## 19. API 서비스 계층 (lib/api.ts)
-
-### 19.1 환경변수
-
-```typescript
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const LLM_API_BASE = process.env.NEXT_PUBLIC_LLM_API_URL || "http://localhost:8001";
-```
-
-### 19.2 전체 API 매핑
-
-| 함수 | HTTP | 엔드포인트 | 대상 서비스 |
-|------|------|-----------|------------|
-| `fetchHealth()` | GET | `/api/v1/health` | ML API |
-| `fetchModelInfo()` | GET | `/api/v1/model/info` | ML API |
-| `predictTest()` | GET | `/api/v1/predict/test` | ML API |
-| `predictTestDegraded()` | GET | `/api/v1/predict/test/degraded` | ML API |
-| `predict(data)` | POST | `/api/v1/predict` | ML API |
-| `requestDiagnosis(req)` | POST | `/api/v1/diagnose` | LLM Service |
-| `checkLLMHealth()` | GET | `/health` | LLM Service |
-
-### 19.3 API 인터페이스 (api.ts에 정의)
-
-```typescript
-export interface SensorData {
-    ntc: number; pm1_0: number; pm2_5: number; pm10: number;
-    ct1: number; ct2: number; ct3: number; ct4: number;
-}
-
-export interface DiagnosisRequest {
-    equipment_id: string;
-    prediction: string;
-    confidence: number;
-    sensors: SensorData;
-    thermal_max_temp?: number;
-}
-
-export interface DiagnosisResponse {
-    equipment_id: string;
-    severity: string;
-    anomalies: string[];
-    probable_cause: string;
-    recommended_action: string;
-    similar_cases: SimilarCase[];
-}
-```
-
-### Listify API 래퍼와 비교
-
-```
-Listify (api.ts 공통 래퍼)           ConveyorGuard (개별 함수)
-──────────────────────               ─────────────────────────
-async function request<T>(           // 공통 래퍼 없음
-  method, endpoint, data             // 각 함수가 직접 fetch 호출
-): Promise<T>
-→ 자동 Authorization 헤더            // 인증 없으므로 불필요
-→ 자동 Content-Type                  → 필요한 함수만 Content-Type 설정
-```
-
----
-
-## 20. 페이지 구조 (App Router)
-
-```
-src/app/
-├── layout.tsx          # 루트 레이아웃 (html, body, 메타데이터)
-├── globals.css         # CSS Variables + 애니메이션
-├── page.tsx            # / → 대시보드 (메인 페이지)
-└── equipment/
-    └── [id]/
-        └── page.tsx    # /equipment/OHT-001 → 장비 상세/진단
-```
-
----
-
-## 21. 대시보드 페이지 (page.tsx)
-
-### 21.1 상태 변수
-
-| 상태 | 타입 | 설명 |
-|------|------|------|
-| `apiStatus` | `"loading" \| "connected" \| "error"` | ML API 연결 상태 |
-| `testResult` | `PredictResponse \| null` | API 테스트 예측 결과 |
-| `search` | `string` | 장비 검색어 |
-| `filter` | `FilterType` | 필터 (all/oht/agv/warning) |
-| `sort` | `SortType` | 정렬 (state/name/temp) |
-
-### 21.2 Mock 데이터
-
-```typescript
-const mockEquipment = [
-    { id: "OHT-001", name: "OHT-001", type: "OHT", state: 0, temperature: 32, current: 45 },
-    { id: "OHT-002", name: "OHT-002", type: "OHT", state: 1, temperature: 48, current: 67 },
-    { id: "OHT-003", name: "OHT-003", type: "OHT", state: 3, temperature: 78, current: 142 },
-    { id: "OHT-004", name: "OHT-004", type: "OHT", state: 2, temperature: 58, current: 89 },
-    { id: "OHT-005", name: "OHT-005", type: "OHT", state: 0, temperature: 30, current: 48 },
-];
-```
-
-### 21.3 useEffect
-
-```typescript
-useEffect(() => {
-    // 마운트 시 ML API 테스트 호출
-    predictTest()
-        .then((res) => { setTestResult(res); setApiStatus("connected"); })
-        .catch(() => setApiStatus("error"));
-}, []);
-```
-
-### 21.4 필터/정렬 로직
-
-```typescript
-// 필터링: 검색어 + 타입 + 상태
-const filtered = mockEquipment.filter((eq) => {
-    if (search && !eq.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filter === "oht" && eq.type !== "OHT") return false;
-    if (filter === "agv" && eq.type !== "AGV") return false;
-    if (filter === "warning" && eq.state === 0) return false;
-    return true;
-});
-
-// 정렬: 상태순(심각→정상) / 이름순 / 온도순
-const sorted = [...filtered].sort((a, b) => {
-    if (sort === "state") return b.state - a.state;
-    if (sort === "name") return a.name.localeCompare(b.name);
-    if (sort === "temp") return b.temperature - a.temperature;
-    return 0;
-});
-```
-
-### 21.5 레이아웃
-
-```
-┌────────────────────────────────────────────────────────┐
-│ Header (로고, 네비게이션, 알림, 프로필)                  │
-├────────────────────────────────────────────────────────┤
-│ 대시보드                               API: 연결됨 ●   │
-├──────┬──────┬──────┬──────────────────────────────────┤
-│전체 5│정상 2│주의 2│위험 1                              │ ← SummaryCard × 4
-├──────┴──────┴──────┴──────────────────────────────────┤
-│                                                        │
-│  실시간 장비 상태          │  AI 예측 테스트            │
-│  [검색] [전체|OHT|AGV|이상] [정렬]│                    │
-│  ┌──────┐ ┌──────┐ ┌──────┐ │  예측: 정상              │
-│  │OHT-01│ │OHT-02│ │OHT-03│ │  신뢰도: 97.2%          │
-│  │정상   │ │경미   │ │심각   │ │  ┌정상  ████████ 97%│  │
-│  │32°C   │ │48°C   │ │78°C   │ │  ├경미  █       2% │  │
-│  └──────┘ └──────┘ └──────┘ │  ├중간  ▏       0% │  │
-│  ┌──────┐ ┌──────┐          │  └심각  ▏       1% │  │
-│  │OHT-04│ │OHT-05│          │                      │
-│  │중간   │ │정상   │          │                      │
-│  └──────┘ └──────┘          │                      │
-└────────────────────────────────────────────────────────┘
-```
-
----
-
-## 22. 장비 상세 페이지 (equipment/[id]/page.tsx)
-
-### 22.1 상태 변수
-
-| 상태 | 타입 | 설명 |
-|------|------|------|
-| `diagnosis` | `DiagnosisResponse \| null` | AI 진단 결과 |
-| `loading` | `boolean` | 진단 로딩 |
-| `dataLoading` | `boolean` | 초기 데이터 로딩 (1초 딜레이) |
-| `error` | `string \| null` | 에러 메시지 |
-| `lastUpdate` | `Date` | 마지막 업데이트 시각 |
-| `historyKey` | `number` | DiagnosisHistory 리렌더 트리거 |
-| `isRefreshing` | `boolean` | 새로고침 아이콘 회전 |
-| `trendData` | `Record<string, TrendData[]>` | 센서 트렌드 차트 데이터 |
-| `toasts` | `ToastData[]` | 토스트 알림 목록 |
-
-### 22.2 센서 임계값 설정
-
-```typescript
-const sensorThresholds = {
-    ntc:  { min: 20, max: 80,  threshold: 50, unit: "°C" },
-    pm1_0:{ min: 0,  max: 100, threshold: 35, unit: "μg/m³" },
-    pm2_5:{ min: 0,  max: 100, threshold: 35, unit: "μg/m³" },
-    pm10: { min: 0,  max: 150, threshold: 75, unit: "μg/m³" },
-    ct1:  { min: 0,  max: 10,  threshold: 5,  unit: "A" },
-    ct2:  { min: 0,  max: 10,  threshold: 5,  unit: "A" },
-    ct3:  { min: 0,  max: 10,  threshold: 5,  unit: "A" },
-    ct4:  { min: 0,  max: 10,  threshold: 5,  unit: "A" },
-};
-```
-
-### 22.3 useEffect 실행 순서
-
-```
-1. 마운트 → 1초 딜레이 후 dataLoading=false + 트렌드 데이터 생성
-2. 10초 간격 자동 업데이트 (setInterval)
-   → lastUpdate 갱신 + 트렌드 데이터 재생성
-```
-
-### 22.4 AI 진단 핸들러
-
-```typescript
-const handleDiagnosis = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-        // 1. LLM 서비스 호출
-        const res = await requestDiagnosis({
-            equipment_id: id,
-            prediction: label,        // "심각" 등
-            confidence: 0.85,
-            sensors: eq.sensors,
-            thermal_max_temp: eq.thermalMax,
-        });
-
-        // 2. 결과 저장
-        setDiagnosis(res);
-
-        // 3. 히스토리 localStorage에 저장
-        saveDiagnosisToHistory(id, res.severity, res.probable_cause);
-        setHistoryKey((prev) => prev + 1);  // 리렌더 트리거
-
-        // 4. 심각도별 토스트 알림
-        if (res.severity === "심각") {
-            addToast(`⚠️ ${eq.name}: 심각한 이상 감지!`, "error");
-        } else if (res.severity === "중간" || res.severity === "경미") {
-            addToast(`${eq.name}: ${res.severity} 수준 이상 감지`, "warning");
-        } else {
-            addToast(`${eq.name}: 정상 상태입니다`, "success");
-        }
-    } catch (e) {
-        setError(e instanceof Error ? e.message : "진단 실패");
-        addToast("AI 진단 실패. LLM 서비스를 확인하세요.", "error");
-    } finally {
-        setLoading(false);
-    }
-};
-```
-
-### 22.5 레이아웃
-
-```
-┌────────────────────────────────────────────────────────────┐
-│ ← OHT-003                          업데이트: 방금 전 ● 심각│ ← 헤더
-│    OHT · FAB2-Zone A                         [🔄]         │
-├────────────────────────────────────────────────────────────┤
-│ 열화상 최고온도                                 85°C       │ ← TempHeatBar
-│ ═══════════════════════════════════════●═══════════════    │
-│ 20°C        40°C        60°C        80°C        100°C     │
-├────────────────────────────────────────────────────────────┤
-│ 센서 데이터 (실시간)                                       │
-│ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │ ← SensorGauge × 8
-│ │NTC 78°C │ │PM1.0 85 │ │PM2.5 102│ │PM10 128 │          │
-│ │████████▒│ │████████▒│ │████████▒│ │████████▒│          │
-│ │0  임:50 80│0  임:35 100│0  임:35 100│0 임:75 150│        │
-│ ├─────────┤ ├─────────┤ ├─────────┤ ├─────────┤          │
-│ │CT1 5.8A │ │CT2 6.2A │ │CT3 5.5A │ │CT4 6.8A │          │
-│ │████████▒│ │████████▒│ │████████▒│ │████████▒│          │
-│ └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
-├──────────────────┬─────────────────┬──────────────────────┤
-│ NTC 추이         │ PM2.5 추이      │ CT1 추이             │ ← SensorTrendChart × 3
-│  ╱╲    --- 임계50│      --- 임계35 │        --- 임계5     │
-│ ╱  ╲╱╲          │    ╱╲           │   ╱╲                 │
-├──────────────────┴─────────────────┴──────────────────────┤
-│                              │                            │
-│  AI 진단 리포트    [AI진단실행] │  진단 히스토리             │
-│                              │  최근 5건                   │
-│  심각도: 심각                 │  심각│베어링 마모│1/15 11:00 │
-│                              │  중간│필터 막힘  │1/14 15:30 │
-│  이상 징후                    │  정상│정상      │1/14 09:00 │
-│  ⚠️ NTC 78°C - 임계초과       │                            │
-│  ⚠️ CT1~CT4 전류 임계초과     │  ┌───┬───┬───┬───┐        │
-│                              │  │ 2 │ 1 │ 3 │ 1 │        │
-│  추정 원인                    │  │정상│경미│중간│심각│        │
-│  ┌────────────────────┐      │  └───┴───┴───┴───┘        │
-│  │ 베어링 마모로 인한   │      │                            │
-│  │ 과열 및 전류 증가    │      │                            │
-│  └────────────────────┘      │                            │
-│                              │                            │
-│  권장 조치                    │                            │
-│  █ 즉시 가동 중단 후          │                            │
-│  █ 베어링 교체 필요           │                            │
-│                              │                            │
-└──────────────────────────────┴────────────────────────────┘
-```
-
----
-
-## 23. 컴포넌트 트리
-
-```
-App Router
-│
-├── layout.tsx (루트 레이아웃: <html lang="ko">)
-│
-├── page.tsx (대시보드)
-│   ├── Header.tsx (상단 네비게이션)
-│   │   └── Lucide: Activity, Bell, User
-│   ├── SummaryCard.tsx × 4 (전체/정상/주의/위험)
-│   └── StatusCard.tsx × N (장비 카드)
-│       └── Lucide: Thermometer, Zap
-│
-└── equipment/[id]/page.tsx (장비 상세)
-    ├── ToastContainer.tsx (우상단 알림)
-    │   └── Toast.tsx × N
-    ├── TempHeatBar.tsx (열화상 그라디언트)
-    ├── SensorGauge.tsx × 8 (센서 게이지)
-    │   └── [또는] SensorGaugeSkeleton × 8
-    ├── SensorTrendChart.tsx × 3 (Recharts 라인차트)
-    │   └── [또는] CardSkeleton × 3
-    ├── AI 진단 리포트 (인라인)
-    │   └── 심각도 + 이상징후 + 추정원인 + 권장조치
-    └── DiagnosisHistory.tsx (localStorage 기반)
-```
-
----
-
-## 24. 컴포넌트 Props 상세
-
-### Header
-
-```typescript
-// Props: 없음 (자체 렌더링)
-// 네비게이션: 대시보드, 장비목록, 알림내역, 설정
-// 아이콘: Activity (로고), Bell (알림배지=3), User (프로필)
-```
-
-### SummaryCard
-
-```typescript
-interface SummaryCardProps {
-    title: string;                                    // "전체 장비", "정상", ...
-    value: number;                                    // 5, 2, 2, 1
-    color?: "normal" | "minor" | "moderate" | "severe" | "default";
-}
-// 렌더: 라벨 + 4xl 볼드 숫자 (color별 텍스트 색상)
-```
-
-### StatusCard
-
-```typescript
-interface StatusCardProps {
-    id: string;                      // "OHT-001"
-    name: string;                    // "OHT-001"
-    type: "OHT" | "AGV";
-    state: DegradationState;         // 0~3
-    temperature: number;             // °C
-    current: number;                 // A
-    onClick?: () => void;            // → router.push(`/equipment/${id}`)
-}
-// 렌더: 상태 컬러 상단바 + 이름/타입 + 상태라벨 + 온도/전류
-// 심각(state=3) 시 status-pulse 애니메이션
-```
-
-### SensorGauge
-
-```typescript
-interface SensorGaugeProps {
-    label: string;        // "NTC", "PM2.5", "CT1" 등
-    value: number;        // 현재값
-    min: number;          // 최소값
-    max: number;          // 최대값
-    unit: string;         // "°C", "μg/m³", "A"
-    threshold: number;    // 임계값 (초과 시 빨강)
-}
-// 렌더: 라벨 + 현재값 + 프로그레스바 + min/임계/max 표시
-// isWarning(value > threshold) 시 빨간색
-```
-
-### SensorTrendChart
-
-```typescript
-interface SensorTrendChartProps {
-    label: string;        // "NTC (온도)"
-    data: TrendData[];    // [{time: "11:00", value: 78.2}, ...]
-    threshold: number;    // 임계 참조선
-    unit: string;         // "°C"
-    color?: string;       // 기본 "#10B981"
-}
-// Recharts: LineChart + XAxis + YAxis + Tooltip + ReferenceLine(임계)
-// 마지막 값이 임계 초과 시 라인 빨간색
-```
-
-### TempHeatBar
-
-```typescript
-interface TempHeatBarProps {
-    temp: number;         // 열화상 최고온도
-}
-// 렌더: 그라디언트 바 (파랑→초록→주황→빨강) + 흰색 마커
-// percent = (temp - 20) / (100 - 20) * 100
-```
-
-### DiagnosisHistory
-
-```typescript
-interface DiagnosisHistoryProps {
-    equipmentId: string;  // "OHT-003"
-}
-// localStorage 키: `diagnosis_history_${equipmentId}`
-// 렌더: 최근 10건 리스트 + 심각도별 카운트 (4그리드)
-```
-
-### Toast / ToastContainer / useToast
-
-```typescript
-interface ToastData {
-    id: string;
-    message: string;
-    type: "success" | "error" | "warning" | "info";
-}
-
-// useToast 훅: addToast(message, type) / removeToast(id)
-// 자동 4초 후 사라짐
-// 우상단 슬라이드-인 애니메이션
-```
-
-### Skeleton 변형
-
-```typescript
-// Skeleton: 기본 사각형 (animate-pulse)
-// SensorGaugeSkeleton: 게이지 모양 플레이스홀더
-// CardSkeleton: 카드 모양 플레이스홀더
-// StatusCardSkeleton: 상태 카드 모양 플레이스홀더
-```
-
----
-
-## 25. 디자인 시스템 (globals.css + tailwind.config.ts)
-
-### CSS Variables (다크 테마 — GitHub 기반)
-
-```css
-@theme {
-    --color-bg-primary: #0D1117;       /* 최상위 배경 */
-    --color-bg-secondary: #161B22;     /* 카드/섹션 배경 */
-    --color-bg-tertiary: #21262D;      /* 입력/호버 배경 */
-    --color-border: #30363D;           /* 테두리 */
-    --color-status-normal: #10B981;    /* 정상 (초록) */
-    --color-status-minor: #F59E0B;     /* 경미 (노랑) */
-    --color-status-moderate: #F97316;  /* 중간 (주황) */
-    --color-status-severe: #EF4444;    /* 심각 (빨강) */
-    --color-brand-primary: #3B82F6;    /* 주 브랜드 (파랑) */
-    --color-brand-accent: #06B6D4;     /* 보조 (시안) */
-    --color-text-primary: #E6EDF3;     /* 주 텍스트 */
-    --color-text-muted: #8B949E;       /* 보조 텍스트 */
-    --font-sans: 'Pretendard', -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
-}
-```
-
-### 커스텀 애니메이션
-
-```css
-/* 심각 상태 펄스 */
-@utility status-pulse {
-    animation: status-pulse 2s ease-in-out infinite;
-}
-@keyframes status-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
-
-/* 토스트 슬라이드-인 */
-.animate-slide-in { animation: slide-in 0.3s ease-out; }
-@keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { ... } }
-```
-
----
-
-## 26. 데이터 저장 (localStorage)
-
-```
-localStorage:
-└── diagnosis_history_{equipmentId}   # JSON 배열 (최대 100건)
-    [{
-        id: "1706345600000",          # Date.now() 문자열
-        date: "1. 15. 오전 11:00",    # 한국어 포맷
-        severity: "심각",
-        cause: "베어링 마모로 인한 과열"
-    }, ...]
-```
-
-### 저장 함수
-
-```typescript
-export function saveDiagnosisToHistory(equipmentId: string, severity: string, cause: string) {
-    const key = `diagnosis_history_${equipmentId}`;
-    const history: HistoryItem[] = JSON.parse(localStorage.getItem(key) || "[]");
-
-    history.unshift({
-        id: Date.now().toString(),
-        date: new Date().toLocaleDateString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }),
-        severity,
-        cause,
-    });
-
-    localStorage.setItem(key, JSON.stringify(history.slice(0, 100)));  // 최대 100건
-}
-```
+### 18.4 데이터 소스
+
+- `data/processed/` — EDA 결과, 학습 데이터 메타
+- `data/results/` — 모델 비교 결과 CSV, HTML 시각화
+- 앱 내 하드코딩된 실험 결과 수치
 
 ---
 
@@ -1790,7 +1260,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 Listify                              ConveyorGuard
 ───────                              ─────────────
-Frontend: Node→Build→Nginx(80)       Frontend: Next.js (개발서버, Docker 미설정)
+Frontend: Node→Build→Nginx(80)       Demo UI: Streamlit (Port 8501, Docker 미설정)
 Backend: Python Flask(5001)          ML API: Python FastAPI(8000)
 DB: host.docker.internal MySQL       DB: 없음 (모델 파일만 마운트)
                                      MLFlow: SQLite(5000)
@@ -1803,48 +1273,22 @@ DB: host.docker.internal MySQL       DB: 없음 (모델 파일만 마운트)
 
 ---
 
-## 28. 시나리오 1: 대시보드 로드
+## 28. 시나리오 1: ML API 예측 호출
 
 ```
-브라우저 → GET /
-  → page.tsx 마운트
-    → useEffect: predictTest()
-      → GET http://localhost:8000/api/v1/predict/test
-      → ML API router.py: predict_test()
-        → model_loader.is_loaded() 확인
-        → 더미 데이터 생성 (정상 범위)
-        → preprocess_input(normalize=True)
-        → model.predict(sensors, images, external)
-      ← PredictResponse { prediction:0, label:"정상", confidence:0.97, probabilities:[...] }
-    → setTestResult(res)
-    → setApiStatus("connected")
-  → 렌더: SummaryCard×4 + StatusCard×5 + 예측 결과 패널
+클라이언트 → GET http://localhost:8000/api/v1/predict/test
+  → ML API router.py: predict_test()
+    → model_loader.is_loaded() 확인
+    → 더미 데이터 생성 (정상 범위)
+    → preprocess_input(normalize=True)
+    → model.predict(sensors, images, external)
+  ← PredictResponse { prediction:0, label:"정상", confidence:0.97, probabilities:[...] }
 ```
 
-## 29. 시나리오 2: 장비 상세 진입 + 자동 업데이트
+## 29. 시나리오 2: AI 진단 실행
 
 ```
-StatusCard 클릭 → router.push("/equipment/OHT-003")
-  → equipment/[id]/page.tsx 마운트
-    → params.id = "OHT-003"
-    → mockData["OHT-003"] → { state:3, sensors:{ntc:78, ...}, thermalMax:85 }
-
-    → useEffect[1]: 1초 딜레이 → setDataLoading(false)
-      → generateMockTrendData(78, 3)  → ntc 트렌드 12포인트
-      → generateMockTrendData(102, 5) → pm2_5 트렌드
-      → generateMockTrendData(5.8, 0.5) → ct1 트렌드
-
-    → useEffect[2]: setInterval(10000)
-      → 매 10초: lastUpdate 갱신 + 트렌드 재생성
-
-  → 렌더: TempHeatBar + SensorGauge×8 + SensorTrendChart×3 + DiagnosisHistory
-```
-
-## 30. 시나리오 3: AI 진단 실행
-
-```
-"AI 진단 실행" 클릭 → handleDiagnosis()
-  → setLoading(true)
+클라이언트 → POST http://localhost:8001/api/v1/diagnose
   → requestDiagnosis({
       equipment_id: "OHT-003",
       prediction: "심각한 열화",
@@ -1852,7 +1296,6 @@ StatusCard 클릭 → router.push("/equipment/OHT-003")
       sensors: { ntc:78, pm1_0:85, pm2_5:102, pm10:128, ct1:5.8, ct2:6.2, ct3:5.5, ct4:6.8 },
       thermal_max_temp: 85
     })
-    → POST http://localhost:8001/api/v1/diagnose
     → LLM router.py: diagnose()
       → generate_diagnosis()
         → Gemini API 호출 (프롬프트: 센서 + 임계값 + 분석 지시)
@@ -1861,13 +1304,6 @@ StatusCard 클릭 → router.push("/equipment/OHT-003")
         → 코사인 유사도 계산 (8채널 벡터)
         → 유사도 순 Top-3 반환
     ← DiagnosisResponse { severity:"심각", anomalies, probable_cause, recommended_action, similar_cases }
-
-  → setDiagnosis(res)
-  → saveDiagnosisToHistory("OHT-003", "심각", "베어링 마모...")
-    → localStorage 저장
-  → setHistoryKey(prev+1) → DiagnosisHistory 리렌더
-  → addToast("⚠️ OHT-003: 심각한 이상 감지!", "error")
-  → setLoading(false)
 ```
 
 ## 31. 시나리오 4: LangGraph 진단 (고급)
@@ -1910,10 +1346,7 @@ POST /api/v1/diagnose/graph
 |------|------|-----------|
 | `conveyorguard-api/app/main.py` | FastAPI 진입점 | 서비스명, 모델 경로 변경 |
 | `conveyorguard-api/app/core/loader.py` | 모델 로더 싱글톤 | 모델 클래스 변경 |
-| `frontend/src/components/ui/Toast.tsx` | 토스트 알림 시스템 | 그대로 사용 |
-| `frontend/src/components/ui/Skeleton.tsx` | 로딩 플레이스홀더 | 그대로 사용 |
-| `frontend/src/app/globals.css` | 다크 테마 CSS Variables | 색상만 변경 |
-| `frontend/tailwind.config.ts` | Tailwind 확장 설정 | 색상/폰트만 변경 |
+| `streamlit-demo/app.py` | Streamlit 데모 앱 템플릿 | 데이터 소스/시각화 변경 |
 | `llm-service/app/monitoring/langsmith_config.py` | 로깅/메트릭 | 그대로 사용 |
 | `docker-compose.yml` | 멀티서비스 오케스트레이션 | 서비스명/포트 변경 |
 | `Dockerfile` | FastAPI 컨테이너 | 그대로 사용 |
@@ -1930,10 +1363,7 @@ POST /api/v1/diagnose/graph
 | `core/rag.py` | RAG 사례 DB + 유사도 함수 |
 | `agents/*.py` | LangGraph 에이전트 그래프 |
 | `tools/*.py` | LangChain Tool 정의 |
-| `types/index.ts` | TypeScript 타입 정의 |
-| `lib/api.ts` | API 클라이언트 함수 |
-| `app/page.tsx` | 메인 페이지 |
-| `components/dashboard/*.tsx` | 도메인 특화 컴포넌트 |
+| `streamlit-demo/app.py` | Streamlit 데모 앱 |
 
 ### 32.3 새 프로젝트 셋업 순서
 
@@ -1955,12 +1385,9 @@ POST /api/v1/diagnose/graph
   ✓ app/agents/*.py      → LangGraph 에이전트
   ✓ app/tools/*.py       → LangChain Tools
 
-3단계: 프론트엔드
-  ✓ src/types/index.ts   → 타입 정의
-  ✓ src/lib/api.ts       → API 클라이언트
-  ✓ src/app/page.tsx     → 대시보드
-  ✓ src/app/{detail}/page.tsx → 상세 페이지
-  ✓ src/components/      → UI 컴포넌트
+3단계: Demo UI
+  ✓ streamlit-demo/app.py → Streamlit 데모 앱
+  ✓ streamlit-demo/requirements.txt → 의존성
 
 4단계: 배포
   ✓ docker-compose.yml
@@ -1983,9 +1410,8 @@ LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your-langsmith-key    # 선택
 LANGCHAIN_PROJECT=conveyorguard
 
-# Frontend (빌드 시)
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_LLM_API_URL=http://localhost:8001
+# Demo UI (Streamlit)
+# 별도 환경변수 불필요 (streamlit run app.py)
 ```
 
 ---
@@ -2015,22 +1441,13 @@ llm-service/
 │       ├── app/tools/diagnosis_tools.py    (5개 LangChain Tools)
 │       └── app/monitoring/langsmith_config.py (Logger)
 
-frontend/
-├── src/app/page.tsx
-│   ├── src/components/layout/Header.tsx
-│   ├── src/components/dashboard/SummaryCard.tsx
-│   ├── src/components/dashboard/StatusCard.tsx
-│   ├── src/lib/api.ts → ML API (8000)
-│   └── src/types/index.ts
-│
-└── src/app/equipment/[id]/page.tsx
-    ├── src/lib/api.ts → LLM Service (8001)
-    ├── src/components/dashboard/SensorGauge.tsx
-    ├── src/components/dashboard/SensorTrendChart.tsx (Recharts)
-    ├── src/components/dashboard/TempHeatBar.tsx
-    ├── src/components/dashboard/DiagnosisHistory.tsx (localStorage)
-    ├── src/components/ui/Toast.tsx (useToast 훅)
-    └── src/components/ui/Skeleton.tsx
+streamlit-demo/
+└── app.py
+    ├── streamlit (UI 프레임워크)
+    ├── plotly.express, plotly.graph_objects (인터랙티브 차트)
+    ├── pandas (데이터 처리)
+    ├── numpy (수치 연산)
+    └── pathlib (파일 경로)
 ```
 
 ---
@@ -2046,9 +1463,7 @@ frontend/
 | `controllers/*.py` | `router.py` 통합 | Pydantic 자동 검증으로 Controller 역할 축소 |
 | `services/*.py` | `preprocessing.py` + `gemini.py` + `rag.py` | 도메인 특화 서비스 |
 | `model/*.py` (SQL) | `model.py` (PyTorch) | SQL → 텐서 연산 |
-| `types.ts` | `types/index.ts` | 도메인 타입 변경 |
-| `api.ts` (공통 래퍼) | `api.ts` (개별 함수) | 인증 헤더 불필요 |
-| `App.tsx` (SPA 전체) | `page.tsx` × 2 (App Router) | 파일 기반 라우팅 |
+| `App.tsx` (React SPA) | `app.py` (Streamlit) | Python 기반 데모 UI |
 | `Login/Register.tsx` | 없음 | 인증 미구현 |
-| `MySQL` | 없음 | localStorage + 모델 파일 |
+| `MySQL` | 없음 | 모델 파일 + In-memory 데이터 |
 | `Spotify API` | `Gemini API` | 음악 검색 → AI 진단 |
