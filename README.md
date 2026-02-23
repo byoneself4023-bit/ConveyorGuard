@@ -200,16 +200,16 @@ streamlit run app.py
 
 ## 학습 노트북
 
-| 노트북 | 설명 | 환경 |
-|--------|------|------|
-| `00_eda.ipynb` | 탐색적 데이터 분석 | Kaggle GPU T4 x2 |
-| `01_preprocess.ipynb` | EDA 기반 전처리 + 윈도우 생성 | Kaggle GPU T4 x2 |
-| `02_baseline_cnn.ipynb` | CNN+Transformer 베이스라인 | Kaggle GPU T4 x2 |
-| `03_ml_baseline.ipynb` | ML 모델 4종 비교 | Kaggle GPU T4 x2 |
-| `04_dl_tuning.ipynb` | Optuna DL 하이퍼파라미터 튜닝 | Kaggle GPU T4 x2 |
-| `05_llm_comparison.ipynb` | Gemini vs Gemma-3 vs Qwen2.5 LLM 진단 비교 | Kaggle GPU T4 x2 |
-| `06_ensemble.ipynb` | ML+DL 앙상블 (Voting, Stacking) | Kaggle GPU T4 x2 |
-| `07_final_comparison.ipynb` | 전체 모델 최종 비교 분석 | Kaggle GPU T4 x2 |
+| 노트북 | 설명 |
+|--------|------|
+| `00_eda.ipynb` | 탐색적 데이터 분석 |
+| `01_preprocess.ipynb` | EDA 기반 전처리 + 윈도우 생성 |
+| `02_baseline_cnn.ipynb` | CNN+Transformer 베이스라인 |
+| `03_ml_baseline.ipynb` | ML 모델 4종 비교 |
+| `04_dl_tuning.ipynb` | Optuna DL 하이퍼파라미터 튜닝 |
+| `05_llm_comparison.ipynb` | Gemini vs Gemma-3 vs Qwen2.5 LLM 진단 비교 |
+| `06_ensemble.ipynb` | ML+DL 앙상블 (Voting, Stacking) |
+| `07_final_comparison.ipynb` | 전체 모델 최종 비교 분석 |
 
 ---
 
@@ -221,12 +221,6 @@ streamlit run app.py
 - [ ] Docker Compose 통합 배포
 - [ ] 실제 데이터로 DL 모델 재학습
 - [ ] MLFlow 실험 관리 통합
-
----
-
-## 개발자
-
-**쿠카** - 아주대학교 AI융합전공
 
 ---
 
