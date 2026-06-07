@@ -14,17 +14,48 @@ LLM_API_BASE = os.getenv("LLM_API_URL", "http://localhost:8001")
 
 
 async def run_pipeline(equipment_id: str, latest_sensors: dict) -> dict | None:
-    """
-    센서 데이터가 들어올 때마다 호출.
-    1. 최근 30개 센서 수집 → ML predict
-    2. equipment.state 업데이트
-    3. state >= 2 → LLM 진단 → diagnosis_history + alerts
+    """센서 입력마다 호출되는 오케스트레이션.
+
+    수집 → 예측 → state 갱신 → (게이트 이상이면) LLM 진단 → 진단·알림 저장.
+    각 단계의 책임은 헬퍼로 분리(SRP). 이 함수는 흐름 조립만 담당한다.
 
     Returns: pipeline result dict or None if skipped
     """
     sb = get_supabase()
 
-    # 1. 최근 30개 센서 데이터 수집
+    rows = _collect_recent_sensors(sb, equipment_id)
+    if rows is None:
+        return None  # 데이터 부족
+
+    prediction, confidence, probabilities = _predict(rows, latest_sensors, equipment_id)
+    label = STATE_LABELS.get(prediction, "정상")
+
+    _update_equipment_state(sb, equipment_id, prediction, confidence)
+
+    result = {
+        "equipment_id": equipment_id,
+        "prediction": prediction,
+        "label": label,
+        "confidence": confidence,
+        "probabilities": probabilities,
+    }
+
+    # 게이트 이상 → LLM 진단 후 진단·알림 저장
+    if prediction >= 2:
+        diagnosis = await _run_llm_diagnosis(equipment_id, label, confidence, latest_sensors)
+        if diagnosis:
+            result["diagnosis"] = diagnosis
+            alert = _persist_diagnosis_and_alert(
+                sb, equipment_id, label, prediction, confidence, diagnosis
+            )
+            if alert:
+                result["alert"] = alert
+
+    return result
+
+
+def _collect_recent_sensors(sb, equipment_id: str) -> list | None:
+    """최근 30개 센서 이력 수집. 5개 미만이면 None, 부족분은 마지막 값으로 패딩."""
     history = (
         sb.table("sensor_data")
         .select("ntc, pm1_0, pm2_5, pm10, ct1, ct2, ct3, ct4")
@@ -35,18 +66,16 @@ async def run_pipeline(equipment_id: str, latest_sensors: dict) -> dict | None:
     )
 
     if len(history.data) < 5:
-        return None  # 데이터 부족
+        return None
 
-    # 30개에 못 미치면 마지막 값으로 패딩
     rows = list(reversed(history.data))
     while len(rows) < 30:
         rows.insert(0, rows[0])
+    return rows
 
-    # 2. ML 예측
-    prediction = None
-    confidence = 0.0
-    probabilities = [0.25, 0.25, 0.25, 0.25]
 
+def _predict(rows: list, latest_sensors: dict, equipment_id: str) -> tuple[int, float, list]:
+    """ML 예측. 모델 미로드·실패 시 센서 기반 간이 판정으로 폴백."""
     if model_loader.is_loaded():
         try:
             sensor_seq = [[r["ntc"], r["pm1_0"], r["pm2_5"], r["pm10"],
@@ -62,22 +91,20 @@ async def run_pipeline(equipment_id: str, latest_sensors: dict) -> dict | None:
             e_t = torch.tensor([external], dtype=torch.float32).to(device)
 
             result = model_loader.model.predict(s_t, i_t, e_t)
-            prediction = result["prediction"].item()
-            confidence = result["confidence"].item()
-            probabilities = result["probabilities"].squeeze().tolist()
+            return (
+                result["prediction"].item(),
+                result["confidence"].item(),
+                result["probabilities"].squeeze().tolist(),
+            )
         except Exception as e:
             logger.warning(f"ML predict failed for {equipment_id}: {e}")
-            # 모델 실패 시 센서 기반 간이 판정
-            prediction = _simple_predict(latest_sensors)
-            confidence = 0.7
-    else:
-        # 모델 미로드 시 간이 판정
-        prediction = _simple_predict(latest_sensors)
-        confidence = 0.7
 
-    label = STATE_LABELS.get(prediction, "정상")
+    # 모델 미로드 또는 실패 → 간이 판정
+    return _simple_predict(latest_sensors), 0.7, [0.25, 0.25, 0.25, 0.25]
 
-    # 3. equipment.state 업데이트
+
+def _update_equipment_state(sb, equipment_id: str, prediction: int, confidence: float) -> None:
+    """equipment.state / confidence 갱신 (독립 쓰기 — 실패해도 흐름 유지)."""
     try:
         sb.table("equipment").update({
             "state": prediction,
@@ -86,48 +113,38 @@ async def run_pipeline(equipment_id: str, latest_sensors: dict) -> dict | None:
     except Exception as e:
         logger.warning(f"State update failed: {e}")
 
-    result = {
-        "equipment_id": equipment_id,
-        "prediction": prediction,
-        "label": label,
-        "confidence": confidence,
-        "probabilities": probabilities,
-    }
 
-    # 4. state >= 2 → LLM 진단
-    if prediction >= 2:
-        diagnosis = await _run_llm_diagnosis(equipment_id, label, confidence, latest_sensors)
-        if diagnosis:
-            result["diagnosis"] = diagnosis
+def _persist_diagnosis_and_alert(
+    sb, equipment_id: str, label: str, prediction: int, confidence: float, diagnosis: dict
+) -> dict | None:
+    """진단 이력 저장 + 알림 생성. 반환: 생성된 알림 정보 또는 None."""
+    # diagnosis_history에 저장
+    try:
+        sb.table("diagnosis_history").insert({
+            "equipment_id": equipment_id,
+            "severity": label,
+            "prediction": prediction,
+            "confidence": round(confidence, 3),
+            "probable_cause": diagnosis.get("probable_cause", ""),
+            "recommended_action": diagnosis.get("recommended_action", ""),
+            "anomalies": diagnosis.get("anomalies", []),
+        }).execute()
+    except Exception as e:
+        logger.warning(f"Diagnosis save failed: {e}")
 
-            # diagnosis_history에 저장
-            try:
-                sb.table("diagnosis_history").insert({
-                    "equipment_id": equipment_id,
-                    "severity": label,
-                    "prediction": prediction,
-                    "confidence": round(confidence, 3),
-                    "probable_cause": diagnosis.get("probable_cause", ""),
-                    "recommended_action": diagnosis.get("recommended_action", ""),
-                    "anomalies": diagnosis.get("anomalies", []),
-                }).execute()
-            except Exception as e:
-                logger.warning(f"Diagnosis save failed: {e}")
-
-            # 알림 생성
-            alert_level = "moderate" if prediction == 2 else "severe"
-            alert_msg = f"{label} 감지: {diagnosis.get('probable_cause', '이상 감지')}"
-            try:
-                sb.table("alerts").insert({
-                    "equipment_id": equipment_id,
-                    "message": alert_msg[:200],
-                    "level": alert_level,
-                }).execute()
-                result["alert"] = {"message": alert_msg, "level": alert_level}
-            except Exception as e:
-                logger.warning(f"Alert create failed: {e}")
-
-    return result
+    # 알림 생성
+    alert_level = "moderate" if prediction == 2 else "severe"
+    alert_msg = f"{label} 감지: {diagnosis.get('probable_cause', '이상 감지')}"
+    try:
+        sb.table("alerts").insert({
+            "equipment_id": equipment_id,
+            "message": alert_msg[:200],
+            "level": alert_level,
+        }).execute()
+        return {"message": alert_msg, "level": alert_level}
+    except Exception as e:
+        logger.warning(f"Alert create failed: {e}")
+        return None
 
 
 def _simple_predict(sensors: dict) -> int:
