@@ -11,6 +11,7 @@ from langgraph.graph import StateGraph, END
 from dotenv import load_dotenv
 
 from app.rag.case_retriever import retriever
+from app.core.gemini import parse_diagnosis_json
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ class DiagnosisState(TypedDict):
     review: str
     review_count: int
     final_report: str
+    structured: dict            # finalize가 write — conveyorguard-api persist 계약 필드
     status: str
 
 
@@ -105,6 +107,15 @@ def reviewer_node(state: DiagnosisState) -> dict:
 
 
 def finalize_node(state: DiagnosisState) -> dict:
+    """승인된 진단을 구조화 필드로 변환(계약 보존) + 리포트 조립."""
+    llm = get_llm()
+    structuring_prompt = f"""다음 진단을 JSON으로만 변환하세요. 다른 텍스트 없이 JSON만 출력.
+진단 내용: {state['diagnosis']}
+
+형식:
+{{"anomalies": ["이상 징후 1", "이상 징후 2"], "probable_cause": "예상 원인", "recommended_action": "권장 조치"}}"""
+    structured = parse_diagnosis_json(llm.invoke(structuring_prompt).content)
+
     cases = _format_cases(state.get("similar_cases", []))
     report = f"""# 진단 리포트
 ## 장비: {state['equipment_id']}
@@ -116,7 +127,7 @@ def finalize_node(state: DiagnosisState) -> dict:
 {state['review']}
 ### 참고 사례
 {cases}"""
-    return {"final_report": report, "status": "approved"}
+    return {"final_report": report, "structured": structured, "status": "approved"}
 
 
 def should_continue(state: DiagnosisState) -> str:
@@ -152,6 +163,6 @@ async def run_diagnosis(equipment_id: str, prediction_result: dict, sensor_data:
         "sensor_data": sensor_data,
         "similar_cases": [],
         "analysis": "", "diagnosis": "", "review": "",
-        "review_count": 0, "final_report": "", "status": "",
+        "review_count": 0, "final_report": "", "structured": {}, "status": "",
     }
     return await asyncio.to_thread(graph.invoke, state)

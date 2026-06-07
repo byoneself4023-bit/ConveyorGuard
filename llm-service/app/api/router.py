@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from app.core.gemini import generate_diagnosis
-from app.core.rag import find_similar_cases
+from app.agents.diagnosis_graph import run_diagnosis
 
 router = APIRouter()
 
@@ -43,74 +42,34 @@ class DiagnosisResponse(BaseModel):
     similar_cases: List[SimilarCase]
 
 
-# ========== 기존 엔드포인트 (유지) ==========
+# ========== 단일 진단 엔드포인트 (게이트 통과 시 4-에이전트 그래프 + 통합 RAG) ==========
 @router.post("/diagnose", response_model=DiagnosisResponse)
 async def diagnose(request: DiagnosisRequest):
-    try:
-        diagnosis = await generate_diagnosis(
-            equipment_id=request.equipment_id,
-            prediction=request.prediction,
-            confidence=request.confidence,
-            sensors=request.sensors.model_dump(),
-            thermal_max_temp=request.thermal_max_temp
-        )
-        similar_cases = find_similar_cases(
-            sensors=request.sensors.model_dump(),
-            prediction=request.prediction
-        )
-        return DiagnosisResponse(
-            equipment_id=request.equipment_id,
-            severity=request.prediction,
-            anomalies=diagnosis["anomalies"],
-            probable_cause=diagnosis["probable_cause"],
-            recommended_action=diagnosis["recommended_action"],
-            similar_cases=similar_cases
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """4-에이전트 그래프(통합 FAISS RAG 참조)를 실행해 구조화 진단을 반환.
 
-
-# ========== 새 엔드포인트 (LangGraph) ==========
-@router.post("/diagnose/graph")
-async def diagnose_graph(request: DiagnosisRequest):
+    게이트(예측>=2)는 호출자(conveyorguard-api)에 있으므로, 이 엔드포인트는
+    게이트 통과 입력에만 도달한다(E 비용 게이트). 응답 스키마는 기존 계약 유지.
+    """
     try:
-        from app.agents.diagnosis_graph import run_diagnosis
-        
         result = await run_diagnosis(
             equipment_id=request.equipment_id,
             prediction_result={"label": request.prediction, "confidence": request.confidence},
-            sensor_data=request.sensors.model_dump()
+            sensor_data=request.sensors.model_dump(),
         )
-        return {
-            "equipment_id": request.equipment_id,
-            "final_report": result.get("final_report", ""),
-            "status": result.get("status", "unknown")
-        }
-    except ImportError:
-        raise HTTPException(status_code=501, detail="LangGraph not installed. pip install langgraph")
+        structured = result.get("structured", {})
+        return DiagnosisResponse(
+            equipment_id=request.equipment_id,
+            severity=request.prediction,
+            anomalies=structured.get("anomalies", []),
+            probable_cause=structured.get("probable_cause", ""),
+            recommended_action=structured.get("recommended_action", ""),
+            similar_cases=result.get("similar_cases", []),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ========== 새 엔드포인트 (고급 RAG) ==========
-@router.post("/diagnose/rag")
-async def diagnose_rag(request: DiagnosisRequest):
-    try:
-        from app.rag.case_retriever import retriever
-        
-        query = f"NTC={request.sensors.ntc} CT={request.sensors.ct1} {request.prediction}"
-        cases = retriever.search(query, k=3)
-        
-        return {
-            "equipment_id": request.equipment_id,
-            "prediction": request.prediction,
-            "similar_cases": cases
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ========== 새 엔드포인트 (메트릭) ==========
+# ========== 메트릭 ==========
 @router.get("/metrics")
 async def get_metrics():
     try:

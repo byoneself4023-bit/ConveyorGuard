@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 from app.rag import case_retriever
 from app.rag.case_retriever import CaseRetriever, load_cases
-from app.core.rag import find_similar_cases
 
 UNIFIED_KEYS = {"case_id", "equipment_id", "date", "severity", "issue", "action", "similarity"}
 
@@ -62,20 +61,3 @@ def test_search_with_mocked_vectorstore():
     assert [c["case_id"] for c in results] == ["CASE-2", "CASE-1"]
     assert set(results[0].keys()) == UNIFIED_KEYS
     assert results[0]["similarity"] == 0.9  # 1 - 0.1
-
-
-def test_find_similar_cases_adapter(monkeypatch):
-    """core.rag 어댑터가 단일 검색기에 위임한다."""
-    captured = {}
-
-    def fake_search(query, k=3):
-        captured["query"] = query
-        captured["k"] = k
-        return [{"case_id": "CASE-1"}]
-
-    monkeypatch.setattr(case_retriever.retriever, "search", fake_search)
-    out = find_similar_cases({"ntc": 78, "pm2_5": 120, "ct1": 5.5}, "심각", top_k=2)
-
-    assert out == [{"case_id": "CASE-1"}]
-    assert captured["k"] == 2
-    assert "심각" in captured["query"] and "78" in captured["query"]
