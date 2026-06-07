@@ -5,13 +5,8 @@ ConveyorGuard - API Schemas
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-
-STATE_LABELS = {
-    0: "정상",
-    1: "경미한 열화",
-    2: "중간 열화",
-    3: "심각한 열화"
-}
+# 라벨 정본은 app.config (SSoT). 기존 import 경로 호환을 위해 re-export.
+from app.config import STATE_LABELS
 
 
 class PredictRequest(BaseModel):

@@ -6,10 +6,10 @@ import httpx
 import torch
 from app.db import get_supabase
 from app.core.loader import model_loader
+from app.config import STATE_LABELS, SEVERITY_GATE
 
 logger = logging.getLogger(__name__)
 
-STATE_LABELS = {0: "정상", 1: "경미", 2: "중간", 3: "심각"}
 LLM_API_BASE = os.getenv("LLM_API_URL", "http://localhost:8001")
 
 
@@ -41,7 +41,7 @@ async def run_pipeline(equipment_id: str, latest_sensors: dict) -> dict | None:
     }
 
     # 게이트 이상 → LLM 진단 후 진단·알림 저장
-    if prediction >= 2:
+    if prediction >= SEVERITY_GATE:
         diagnosis = await _run_llm_diagnosis(equipment_id, label, confidence, latest_sensors)
         if diagnosis:
             result["diagnosis"] = diagnosis
@@ -142,7 +142,7 @@ def _persist_diagnosis_and_alert(
         return None
 
     # 2. 알림 생성 — 실패 시 진단을 보상 롤백한다
-    alert_level = "moderate" if prediction == 2 else "severe"
+    alert_level = "moderate" if prediction == SEVERITY_GATE else "severe"
     alert_msg = f"{label} 감지: {diagnosis.get('probable_cause', '이상 감지')}"
     try:
         sb.table("alerts").insert({
@@ -210,5 +210,5 @@ async def _run_llm_diagnosis(equipment_id: str, label: str, confidence: float, s
         "severity": label,
         "anomalies": [f"센서 이상 감지 ({label})"],
         "probable_cause": f"자동 감지된 {label} 상태 — 센서 데이터 기반 판정",
-        "recommended_action": "점검 필요" if label == "중간" else "즉시 점검 필요",
+        "recommended_action": "점검 필요" if label == STATE_LABELS[SEVERITY_GATE] else "즉시 점검 필요",
     }

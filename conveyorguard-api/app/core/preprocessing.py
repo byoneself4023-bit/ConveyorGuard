@@ -6,6 +6,9 @@ ConveyorGuard - Preprocessing Utilities
 import numpy as np
 from typing import Dict, Union
 
+# 라벨 정본은 app.config (SSoT). 기존 LABEL_MAP 이름은 호환을 위해 별칭으로 유지.
+from app.config import STATE_LABELS as LABEL_MAP
+
 
 # 센서 정규화 범위
 SENSOR_RANGES = {
@@ -25,14 +28,6 @@ EXTERNAL_RANGES = np.array([
     [0, 100],   # 습도 (%)
     [0, 1000],  # 조도 (lux)
 ], dtype=np.float32)
-
-# 라벨 매핑
-LABEL_MAP = {
-    0: "정상",
-    1: "경미한 열화",
-    2: "중간 열화",
-    3: "심각한 열화"
-}
 
 
 def normalize_sensors(data: np.ndarray) -> np.ndarray:
