@@ -1,17 +1,26 @@
 import json
+import logging
 import numpy as np
 from pathlib import Path
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 # 과거 사례 로드
 CASES_PATH = Path(__file__).parent.parent / "data" / "cases.json"
 
 def load_cases() -> List[Dict]:
-    """과거 고장 사례 로드"""
+    """과거 고장 사례 로드.
+
+    실패(파일 없음·JSON 깨짐)는 빈 결과로 조용히 삼키지 않고 로깅해 가시화한다.
+    호출자(find_similar_cases)는 빈 리스트를 "사례 0건"으로 정상 처리하므로,
+    여기서는 전파 대신 로깅 후 빈 리스트를 돌려 흐름은 유지한다.
+    """
     try:
         with open(CASES_PATH, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except:
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning("사례 로딩 실패 (%s): %s", CASES_PATH, e)
         return []
 
 def calculate_similarity(sensors1: Dict, sensors2: Dict) -> float:
