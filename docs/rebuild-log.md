@@ -24,11 +24,11 @@
 
 | 항목 | 판정 | 근거 |
 |---|---|---|
-| **A 멀티에이전트 필요성 / 과설계** | 유지(정당) | analyzer·diagnostician·reviewer는 역할이 진짜 다르고 순차 의존. reviewer = 독립 검증층(D). retrieval·finalize는 LLM 역할이 아닌 유틸 노드(RAG 호출 / 포맷+구조화). 즉 LLM 에이전트 3 + 유틸 2 — 과분할 아님. (향후 단순화 여지: analyzer를 diagnostician에 흡수 가능하나, 검증 루프 가치를 위해 현행 유지.) |
+| **A 멀티에이전트 필요성 / 과설계** | 유지(정당) | analyzer·diagnostician·reviewer는 역할이 진짜 다르고 순차 의존. reviewer = 독립 검증층(D). retrieval·finalize는 LLM 역할이 아닌 유틸 노드(RAG 호출 / 파싱+포맷, **LLM 호출 없음** — diagnostician이 서술+구조화 JSON을 함께 산출하고 finalize는 파싱만). 즉 **LLM 에이전트 3 + 유틸 2** — 과분할 아님. (향후 단순화 여지: analyzer를 diagnostician에 흡수 가능하나, 검증 루프 가치를 위해 현행 유지.) |
 | **B 순차/병렬** | 순차(정당) | 진단은 분석 출력 의존, 검토는 진단 출력 의존 → 순차 필연. 병렬화 대상 없음. |
 | **C State** | 명시 | `similar_cases`(write=retrieval, read=diagnostician·reviewer), `structured`(write=finalize, read=엔드포인트 매핑). 안 쓰는 필드 없음. |
 | **D 검증층** | 적용 | reviewer가 진단의 사례 근거 반영을 점검(APPROVE/REVISE), 재시도 루프 가드 `review_count>=2`(무한루프 방지). |
-| **E 비용 게이트** | 적용 | 게이트(예측>=2)는 conveyorguard-api에 단일 유지(SSoT). 비싼 4-에이전트(약 4~5 LLM콜)를 게이트가 거름. `/diagnose`는 게이트 통과 입력에만 도달. |
+| **E 비용 게이트** | 적용 | 게이트(예측>=2)는 conveyorguard-api에 단일 유지(SSoT). 비싼 4-에이전트(analyzer 1 + diagnostician 1~2 + reviewer 1~2 = **3~5 LLM콜**, finalize는 LLM 없음·재시도 `review_count>=2` 기준)를 게이트가 거름. `/diagnose`는 게이트 통과 입력에만 도달. |
 | **F 실패 가시성** | 적용 | 그래프 노드 LLM 실패는 예외 전파 → `/diagnose` 500(빈 결과 둔갑 X). conveyorguard-api `_run_llm_diagnosis`는 HTTP 실패 시 로깅+폴백 진단. RAG 실패는 retriever에서 로깅+폴백. 트레이싱: `/metrics`(langsmith). |
 | **G 하네스 병행** | 해당없음 | 단일 하네스(LangGraph). |
 | **H 컨텍스트 엔지니어링** | 적용 | RAG 사례를 `_format_cases`로 구조화해 프롬프트에 주입. |
@@ -42,9 +42,14 @@
 - 단위 테스트는 LLM(`get_llm`)·retriever·`run_diagnosis`를 모킹 — 키 없이 그래프 배선·RAG 주입·구조화 출력·엔드포인트 계약을 검증.
 
 ## 검증 결과
-- `llm-service`: `pytest -q` → **7 passed** (RAG 3 / 그래프 2 / 엔드포인트 계약·404 2).
+- `llm-service`: `pytest -q` → **8 passed** (RAG 3 / 그래프 3 / 엔드포인트 계약·404 2).
 - `conveyorguard-api`: `pytest -q` → **4 passed** (계약 불변, 원자성 보상 유지).
-- 구조 점검: `/diagnose/graph`·`/diagnose/rag`·`core/rag.py`·`diagnosis_tools.py` 제거 후 코드 내 잔존 참조 없음(docstring·404 테스트 제외).
+- 구조 점검: `/diagnose/graph`·`/diagnose/rag`·`core/rag.py`·`diagnosis_tools.py` 제거 후 코드 내 잔존 참조 없음(docstring·404 테스트 제외). `structuring_prompt` 잔존 0.
+
+## Hardening (rebuild/unified-diagnosis 후속, 한 커밋)
+- **작업 1 — finalize 구조화 LLM 콜 제거:** diagnostician이 "서술 + ```json 블록"을 함께 산출 → finalize는 `parse_diagnosis_json`으로 파싱만(LLM 0). 같은 진단을 LLM에 두 번 통과시키던 불필요 콜 1개 제거 → 콜 4→3 (단순 경로). `parse_diagnosis_json`에 서술 끝 ```json 블록 추출 보강, 리포트엔 `strip_json_block`로 서술 본문만 노출.
+- **작업 2 — 강제 종료 status 구분(§F):** `review_count>=2`로 강제 종료 시 reviewer 미승인이면 `status="force_finalized"`(승인 시 `approved`) → 검토 미통과가 `approved`로 가려지지 않음.
+- **작업 3 — analyzer 센서 보강:** NTC/CT1/PM2.5 3개 → 8센서(PM1.0/PM10/CT2~CT4 추가) + 열화상(`thermal_max_temp`, router에서 `sensor_data`로 전달, 있을 때만) + 임계값 참고(NTC 50/70°C, PM2.5 35, CT 5A).
 
 ## 커밋 매핑 (`rebuild/unified-diagnosis`, 한 단계=한 결정)
 1. `refactor(RAG):` FAISS 단일화 + cases.json 정본

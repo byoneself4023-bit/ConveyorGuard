@@ -51,10 +51,13 @@ async def diagnose(request: DiagnosisRequest):
     게이트 통과 입력에만 도달한다(E 비용 게이트). 응답 스키마는 기존 계약 유지.
     """
     try:
+        sensor_data = request.sensors.model_dump()
+        if request.thermal_max_temp is not None:
+            sensor_data["thermal_max_temp"] = request.thermal_max_temp
         result = await run_diagnosis(
             equipment_id=request.equipment_id,
             prediction_result={"label": request.prediction, "confidence": request.confidence},
-            sensor_data=request.sensors.model_dump(),
+            sensor_data=sensor_data,
         )
         structured = result.get("structured", {})
         return DiagnosisResponse(
