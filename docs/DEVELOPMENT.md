@@ -128,16 +128,14 @@ class DiagnosisResponse:
 ### 4.3 진단 플로우
 
 ```
-POST /api/v1/diagnose
+POST /api/v1/diagnose   (게이트 통과 입력에만 도달)
         │
-        ├──► generate_diagnosis()  (gemini.py)
-        │         │
-        │         ├─► analyze_sensors() - 이상치 검출
-        │         ├─► get_diagnosis_prompt() - 프롬프트 생성
-        │         └─► Gemini 2.5 Flash API 호출
-        │
-        └──► find_similar_cases()  (rag.py)
-                  └─► 코사인 유사도로 유사 사례 검색
+        └──► run_diagnosis()  (agents/diagnosis_graph.py)
+                  ├─► retrieval  → 통합 FAISS RAG (case_retriever, cases.json)
+                  ├─► analyzer   → 센서 이상 분석
+                  ├─► diagnostician → 사례 근거로 진단
+                  ├─► reviewer   → 검증(APPROVE/REVISE, 최대 2회)
+                  └─► finalize   → 구조화 출력(anomalies/probable_cause/recommended_action)
 ```
 
 ### 4.4 고급 기능 (미연동)

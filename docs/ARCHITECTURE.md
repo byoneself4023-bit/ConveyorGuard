@@ -564,9 +564,7 @@ async def health_check():
 
 | 메서드 | 엔드포인트 | 역할 | 기술 |
 |--------|-----------|------|------|
-| `POST` | `/api/v1/diagnose` | 표준 AI 진단 | Gemini + 코사인 유사도 RAG |
-| `POST` | `/api/v1/diagnose/graph` | LangGraph 에이전트 진단 | LangGraph StateGraph |
-| `POST` | `/api/v1/diagnose/rag` | FAISS 유사 사례 검색 | HuggingFace + FAISS |
+| `POST` | `/api/v1/diagnose` | 단일 AI 진단 (게이트 통과 시) | 4-에이전트 LangGraph + 통합 FAISS RAG |
 | `GET` | `/api/v1/metrics` | 모니터링 메트릭 | LangSmith Logger |
 | `GET` | `/api/v1/test` | 테스트 진단 | 더미 데이터 |
 

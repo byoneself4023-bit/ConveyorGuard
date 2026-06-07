@@ -1,84 +1,61 @@
-import os
+"""
+진단 JSON 파싱 유틸.
+
+단일 Gemini 호출 진단 경로(generate_diagnosis)는 4-에이전트 그래프로 대체됐다.
+구조화 출력 파싱 로직만 공유 유틸로 남겨 그래프 finalize에서 재사용한다.
+"""
 import json
-import asyncio
 import logging
-from dotenv import load_dotenv
-
-load_dotenv()
-
-import google.generativeai as genai
-
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
-model = genai.GenerativeModel("gemini-2.5-flash")
+import re
 
 logger = logging.getLogger(__name__)
 
+# 진단 구조화 필드 (conveyorguard-api persist 계약)
+_FALLBACK_KEYS = ("anomalies", "probable_cause", "recommended_action")
 
-async def generate_diagnosis(
-    equipment_id: str,
-    prediction: str,
-    confidence: float,
-    sensors: dict,
-    thermal_max_temp: float = None
-) -> dict:
+# 서술 끝/중간에 박힌 ```json ... ``` (또는 펜스 없는) JSON 객체 추출용
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_BARE_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def strip_json_block(text: str) -> str:
+    """서술에서 구조화 JSON 코드블록을 제거해 사람이 읽을 서술 본문만 남긴다."""
+    return _JSON_BLOCK.sub("", text or "").strip()
+
+
+def _extract_json_candidate(text: str) -> str:
+    """서술 어디에 있든 JSON 객체 후보를 뽑아낸다(펜스 블록 우선, 없으면 bare 객체)."""
+    fenced = _JSON_BLOCK.search(text)
+    if fenced:
+        return fenced.group(1)
+    if text.startswith("```"):  # 전체가 코드블록인 경우(기존 동작)
+        return "\n".join(text.split("\n")[1:-1])
+    bare = _BARE_OBJECT.search(text)
+    if bare:
+        return bare.group(0)
+    return text
+
+
+def parse_diagnosis_json(text: str) -> dict:
+    """LLM 응답 텍스트에서 진단 JSON을 추출. 실패 시 로깅 후 폴백 구조 반환.
+
+    diagnostician이 "서술 + ```json 블록"을 함께 내므로, 서술 끝에 박힌 블록도 뽑는다.
     """
-    ML 예측 결과와 센서 데이터를 받아 구조화된 진단 결과 반환
-    """
-    thermal_info = f"\n- 열화상 최고온도: {thermal_max_temp}°C" if thermal_max_temp else ""
-
-    prompt = f"""당신은 제조설비 예지보전 전문가입니다.
-
-## 장비 정보
-- 장비 ID: {equipment_id}
-
-## 예측 결과
-- 열화 상태: {prediction}
-- 신뢰도: {confidence:.1%}
-
-## 센서 데이터
-- NTC (온도): {sensors.get('ntc', 'N/A')}°C
-- PM1.0: {sensors.get('pm1_0', 'N/A')} μg/m³
-- PM2.5: {sensors.get('pm2_5', 'N/A')} μg/m³
-- PM10: {sensors.get('pm10', 'N/A')} μg/m³
-- CT1: {sensors.get('ct1', 'N/A')}A
-- CT2: {sensors.get('ct2', 'N/A')}A
-- CT3: {sensors.get('ct3', 'N/A')}A
-- CT4: {sensors.get('ct4', 'N/A')}A{thermal_info}
-
-## 임계값 기준
-- NTC: 50°C 이상 주의, 70°C 이상 위험
-- PM2.5: 35 μg/m³ 이상 주의
-- CT (전류): 5A 이상 주의
-
-## 작업
-아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
-
-{{
-  "anomalies": ["이상 징후 1", "이상 징후 2"],
-  "probable_cause": "예상 원인 설명",
-  "recommended_action": "권장 조치 사항"
-}}
-
-전문적이고 간결하게 작성하세요.
-"""
-
-    response = await asyncio.to_thread(model.generate_content, prompt)
-    text = response.text.strip()
-
-    # JSON 블록 추출 (```json ... ``` 형태 처리)
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1])
+    text = (text or "").strip()
+    candidate = _extract_json_candidate(text)
 
     try:
-        result = json.loads(text)
-    except json.JSONDecodeError:
-        logger.warning("Gemini 응답 JSON 파싱 실패, 기본 구조로 반환: %s", text[:200])
-        result = {
-            "anomalies": [text[:200]],
-            "probable_cause": "Gemini 응답 파싱 실패 - 원문 참조",
-            "recommended_action": "수동 점검 필요"
+        result = json.loads(candidate)
+        # 필수 키 보강
+        return {
+            "anomalies": result.get("anomalies", []),
+            "probable_cause": result.get("probable_cause", ""),
+            "recommended_action": result.get("recommended_action", ""),
         }
-
-    return result
+    except (json.JSONDecodeError, AttributeError) as e:
+        logger.warning("진단 JSON 파싱 실패, 폴백 구조 반환: %s", text[:200])
+        return {
+            "anomalies": [text[:200]] if text else [],
+            "probable_cause": "구조화 파싱 실패 — 원문 참조",
+            "recommended_action": "수동 점검 필요",
+        }
