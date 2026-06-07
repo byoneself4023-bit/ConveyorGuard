@@ -127,3 +127,28 @@ async def test_at_gate_persists_diagnosis_and_alert(fake_sb, monkeypatch):
     inserted = fake_sb.tables_inserted()
     assert "diagnosis_history" in inserted
     assert "alerts" in inserted
+
+
+async def test_alert_failure_rolls_back_diagnosis(fake_sb, monkeypatch):
+    """④원자성: 알림 저장이 실패하면 진단을 보상 롤백(delete)한다."""
+    monkeypatch.setattr(pipeline, "_run_llm_diagnosis", _fake_diag)
+    fake_sb.insert_returns["diagnosis_history"] = [{"id": "diag-123"}]
+    fake_sb.errors[("alerts", "insert")] = RuntimeError("alert insert boom")
+
+    result = await pipeline.run_pipeline("eq-1", HIGH_SENSORS)
+
+    # 진단은 저장 시도됐고, 알림 실패로 진단이 삭제(보상)됐다 → 절반 상태 없음
+    assert ("diagnosis_history", "insert") in fake_sb.calls
+    assert ("diagnosis_history", "delete") in fake_sb.calls
+    assert "alert" not in result
+
+
+async def test_diagnosis_failure_skips_alert(fake_sb, monkeypatch):
+    """④원자성: 진단 저장이 실패하면 알림을 만들지 않는다(전무)."""
+    monkeypatch.setattr(pipeline, "_run_llm_diagnosis", _fake_diag)
+    fake_sb.errors[("diagnosis_history", "insert")] = RuntimeError("diag insert boom")
+
+    result = await pipeline.run_pipeline("eq-1", HIGH_SENSORS)
+
+    assert "alerts" not in fake_sb.tables_inserted()
+    assert "alert" not in result

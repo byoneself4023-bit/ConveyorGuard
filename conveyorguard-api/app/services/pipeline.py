@@ -117,10 +117,17 @@ def _update_equipment_state(sb, equipment_id: str, prediction: int, confidence: 
 def _persist_diagnosis_and_alert(
     sb, equipment_id: str, label: str, prediction: int, confidence: float, diagnosis: dict
 ) -> dict | None:
-    """진단 이력 저장 + 알림 생성. 반환: 생성된 알림 정보 또는 None."""
-    # diagnosis_history에 저장
+    """진단 이력 저장 + 알림 생성을 하나의 논리 단위로 취급(원자성).
+
+    Supabase 파이썬 클라이언트는 멀티테이블 트랜잭션을 지원하지 않으므로,
+    앱레벨 보상으로 전부-아니면-전무를 보장한다:
+      - 진단 저장 실패 → 알림을 만들지 않음(저장 안 된 진단을 알릴 수 없음).
+      - 알림 생성 실패 → 방금 저장한 진단을 삭제(보상 롤백)해 절반 상태를 막음.
+    반환: 생성된 알림 정보 또는 None.
+    """
+    # 1. 진단 저장 — 실패 시 알림도 만들지 않는다
     try:
-        sb.table("diagnosis_history").insert({
+        resp = sb.table("diagnosis_history").insert({
             "equipment_id": equipment_id,
             "severity": label,
             "prediction": prediction,
@@ -129,10 +136,12 @@ def _persist_diagnosis_and_alert(
             "recommended_action": diagnosis.get("recommended_action", ""),
             "anomalies": diagnosis.get("anomalies", []),
         }).execute()
+        diag_id = resp.data[0]["id"] if resp.data else None
     except Exception as e:
-        logger.warning(f"Diagnosis save failed: {e}")
+        logger.warning(f"Diagnosis save failed, skipping alert: {e}")
+        return None
 
-    # 알림 생성
+    # 2. 알림 생성 — 실패 시 진단을 보상 롤백한다
     alert_level = "moderate" if prediction == 2 else "severe"
     alert_msg = f"{label} 감지: {diagnosis.get('probable_cause', '이상 감지')}"
     try:
@@ -143,7 +152,12 @@ def _persist_diagnosis_and_alert(
         }).execute()
         return {"message": alert_msg, "level": alert_level}
     except Exception as e:
-        logger.warning(f"Alert create failed: {e}")
+        logger.warning(f"Alert create failed, rolling back diagnosis {diag_id}: {e}")
+        if diag_id is not None:
+            try:
+                sb.table("diagnosis_history").delete().eq("id", diag_id).execute()
+            except Exception as del_e:
+                logger.error(f"Compensation delete failed for diagnosis {diag_id}: {del_e}")
         return None
 
 
